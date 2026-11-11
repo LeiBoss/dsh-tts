@@ -43,6 +43,12 @@ export const DEFAULT_QUEUE_SIZE = 4
 /** How long a caller may wait for a slot before TTS_BUSY. */
 export const DEFAULT_QUEUE_TIMEOUT_MS = 10_000
 
+/** Upper bound for one complete `tts_generate` call, across all chunks. */
+export const DEFAULT_TOTAL_TIMEOUT_MS = 180_000
+
+/** Extra Host names accepted by the audio route (reverse proxies). */
+export const DEFAULT_TRUSTED_HOSTS: readonly string[] = []
+
 /** One engine in the fallback chain. */
 export type TtsEngine = (typeof DEFAULT_FALLBACK_ORDER)[number]
 
@@ -67,6 +73,8 @@ export const Config = z.object({
   maxConcurrent: z.number().default(DEFAULT_MAX_CONCURRENT),
   queueSize: z.number().default(DEFAULT_QUEUE_SIZE),
   queueTimeoutMs: z.number().default(DEFAULT_QUEUE_TIMEOUT_MS),
+  totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
+  trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
 })
 
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
@@ -82,13 +90,15 @@ export interface TtsConfig {
   maxConcurrent?: number
   queueSize?: number
   queueTimeoutMs?: number
+  totalTimeoutMs?: number
+  trustedHosts?: string[]
 }
 
 /** Effective, path-resolved plugin settings. */
 export interface ResolvedConfig {
   /** Harness home from `DSH_HOME`; empty when unset. */
   dshHome: string
-  /** Absolute output root; derived from `outputDir` or the home directory. */
+  /** Absolute output root; falls back to `~/.dsh/tts-output`. */
   outputDir: string
   defaultVoice: string
   timeoutMs: number
@@ -101,6 +111,8 @@ export interface ResolvedConfig {
   maxConcurrent: number
   queueSize: number
   queueTimeoutMs: number
+  totalTimeoutMs: number
+  trustedHosts: string[]
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -109,9 +121,9 @@ function nonEmpty(value: string | undefined): string | undefined {
 }
 
 /**
- * Resolve config defaults without touching the filesystem. `outputDir` falls
- * back to `$DSH_HOME/tts-output` and then to `~/.dsh/tts-output`, so hosts
- * that do not export `DSH_HOME` still work out of the box.
+ * Resolve config defaults without touching the filesystem. A missing
+ * `DSH_HOME` is not fatal here: explicit `outputDir` still works, and the
+ * self-check needs to report the missing value instead of failing to load.
  */
 export function resolveConfig(
   raw?: Partial<TtsConfig>,
@@ -141,6 +153,10 @@ export function resolveConfig(
     maxConcurrent: raw?.maxConcurrent ?? DEFAULT_MAX_CONCURRENT,
     queueSize: raw?.queueSize ?? DEFAULT_QUEUE_SIZE,
     queueTimeoutMs: raw?.queueTimeoutMs ?? DEFAULT_QUEUE_TIMEOUT_MS,
+    totalTimeoutMs: raw?.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS,
+    trustedHosts: (raw?.trustedHosts ?? [...DEFAULT_TRUSTED_HOSTS])
+      .map((host) => host.trim().toLowerCase())
+      .filter((host) => host.length > 0),
   }
 }
 
@@ -158,6 +174,8 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
   maxConcurrent: number
   queueSize: number
   queueTimeoutMs: number
+  totalTimeoutMs: number
+  trustedHosts: string[]
 } {
   if (!config.outputDir) {
     throw new TtsError(
@@ -207,6 +225,13 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
       'Set `queueTimeoutMs` to a positive millisecond value (default 10000).',
     )
   }
+  if (!Number.isFinite(config.totalTimeoutMs) || config.totalTimeoutMs <= 0) {
+    throw new TtsError(
+      ErrorCode.InvalidConfig,
+      `Invalid config: totalTimeoutMs must be a positive number, got ${JSON.stringify(config.totalTimeoutMs)}.`,
+      'Set `totalTimeoutMs` to a positive millisecond value (default 180000).',
+    )
+  }
   return {
     outputDir: config.outputDir,
     timeoutMs: config.timeoutMs,
@@ -217,5 +242,7 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
     maxConcurrent: config.maxConcurrent,
     queueSize: config.queueSize,
     queueTimeoutMs: config.queueTimeoutMs,
+    totalTimeoutMs: config.totalTimeoutMs,
+    trustedHosts: config.trustedHosts,
   }
 }

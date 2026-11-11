@@ -24,3 +24,11 @@ test('an unset DSH_HOME falls back to ~/.dsh/tts-output', () => {
   assert.equal(config.dshHome, '')
   assert.ok(config.outputDir.startsWith('/') || config.outputDir.includes(':'))
 })
+
+test('trustedHosts is normalised and blank entries are dropped', () => {
+  const config = resolveConfig(
+    { trustedHosts: [' Proxy.Test ', '', 'tts.local'] },
+    {},
+  )
+  assert.deepEqual(config.trustedHosts, ['proxy.test', 'tts.local'])
+})

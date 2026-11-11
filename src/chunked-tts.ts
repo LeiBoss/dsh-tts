@@ -11,6 +11,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { AUDIO_FORMAT, outputFilePath } from './cache.ts'
+import { DEFAULT_TOTAL_TIMEOUT_MS } from './config.ts'
 import { splitText } from './chunker.ts'
 import {
   synthesize,
@@ -34,6 +35,8 @@ export interface ChunkedSynthesisOptions {
   /** Cache key of the full original text. */
   hash: string
   timeoutMs: number
+  /** Whole-call budget across every chunk and inter-chunk delay. */
+  totalTimeoutMs?: number
   chunkSize: number
   signal?: AbortSignal
   spawnImpl?: SpawnFunction
@@ -75,6 +78,18 @@ function publishFailure(target: string, error: unknown): TtsError {
   )
 }
 
+function overallTimeout(
+  totalTimeoutMs: number,
+  index: number,
+  total: number,
+): TtsError {
+  return new TtsError(
+    ErrorCode.SynthesisTimeout,
+    `Overall synthesis deadline of ${totalTimeoutMs} ms was exceeded before chunk ${index + 1}/${total}.`,
+    'Increase `totalTimeoutMs`, shorten the text, or raise `chunkSize`.',
+  )
+}
+
 /**
  * Synthesize `text` chunk by chunk and return one concatenated MP3. Callers
  * only use this above the chunk threshold; calling it with one chunk simply
@@ -109,6 +124,8 @@ export async function synthesizeChunked(
   const delay = options.delay ?? sleep
   const tempDir = await mkdtemp(join(tmpdir(), 'dsh-tts-chunks-'))
   const baseTime = (options.now ?? new Date()).getTime()
+  const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS
+  const deadline = Date.now() + totalTimeoutMs
 
   try {
     const buffers: Buffer[] = []
@@ -116,17 +133,28 @@ export async function synthesizeChunked(
       if (options.signal?.aborted) {
         throw new TtsError(ErrorCode.Aborted, 'Chunked synthesis was aborted.')
       }
+      if (Date.now() >= deadline) {
+        throw overallTimeout(totalTimeoutMs, index, chunks.length)
+      }
       if (index > 0 && delayMs > 0) await delay(delayMs)
+      if (Date.now() >= deadline) {
+        throw overallTimeout(totalTimeoutMs, index, chunks.length)
+      }
 
+      const remaining = deadline - Date.now()
       try {
         const part = await synthesize(chunks[index] ?? '', {
           ...base,
+          timeoutMs: Math.max(1, Math.min(options.timeoutMs, remaining)),
           outputDir: tempDir,
           hash: `part-${index}`,
           now: new Date(baseTime + index),
         })
         buffers.push(await readFile(part.filePath))
       } catch (error) {
+        if (Date.now() >= deadline) {
+          throw overallTimeout(totalTimeoutMs, index, chunks.length)
+        }
         throw chunkFailure(index, chunks.length, error)
       }
     }

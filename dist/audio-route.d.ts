@@ -9,14 +9,31 @@ export interface RegisterableRoute {
     path: string;
     handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 }
-/** Structural view of `ctx.httpServer`; only `register` is used. */
+/** Structural view of the host `webServer` service; only `register` is used. */
 export interface HttpRouteRegistrar {
     register(route: RegisterableRoute): () => void;
     /** Advertised bind host, when the host exposes it. */
     host?: string;
     /** Actual listening port, when the host exposes it. */
     port?: number;
+    /** Scheme advertised by the host, when available. */
+    protocol?: string;
+    /** Origin advertised by the host, when available. */
+    getOrigin?(): string | undefined;
 }
+/**
+ * Host-provided trust fence. DSH 0.2.2 exposes this as `ctx.connection`;
+ * `admit` is intentionally not used so links remain shareable to a browser
+ * that has no DSH session cookie.
+ */
+export interface ConnectionFence {
+    requestRejection?(input: {
+        headers: Record<string, string | string[] | undefined>;
+    }): 401 | 403 | undefined;
+    allowsRemoteAuthorities?: boolean;
+}
+/** Name of the persisted HMAC secret inside the output directory. */
+export declare const SECRET_FILE_NAME = ".audio-route-secret";
 /** Resolves a local audio path to a browser-openable URL, when routable. */
 export interface AudioUrlProvider {
     urlFor(filePath: string): string | undefined;
@@ -28,6 +45,8 @@ export interface AudioRouteOptions {
     ttlMs?: number;
     /** Override the per-instance HMAC secret (tests only). */
     secret?: Buffer;
+    /** Path of the persisted secret; defaults to `<outputDir>/.audio-route-secret`. */
+    secretPath?: string;
     /** Injectable clock in epoch milliseconds. */
     now?: () => number;
     /** Hostnames allowed in `Host`; unset means any hostname (port still checked). */
@@ -36,6 +55,10 @@ export interface AudioRouteOptions {
     expectedPort?: number;
     /** Debug sink for origin rejections; receives no token or path. */
     debug?: (message: string) => void;
+    /** Extra trusted Host names (reverse proxies); disables port pinning. */
+    trustedHosts?: readonly string[];
+    /** Host trust fence, when DSH exposes `ctx.connection`. */
+    connection?: ConnectionFence;
 }
 /**
  * Owns the signed-token format and the HTTP handler. One instance per plugin
@@ -47,8 +70,11 @@ export declare class AudioRoute implements AudioUrlProvider {
     private readonly secret;
     private readonly now;
     private readonly debug?;
+    private readonly trustedHosts;
+    private readonly connection?;
     private allowedHosts?;
     private expectedPort?;
+    private skipPortCheck;
     private active;
     constructor(options: AudioRouteOptions);
     /** True once the host router accepted the route. */
