@@ -153,6 +153,34 @@ export function createTtsTools(config, deps = {}) {
         }
         return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine);
     };
+    /**
+     * Human-readable tool output. The JSON contract keeps `browserUrl` relative;
+     * the absolute link is rendered only when the host advertised an origin, so
+     * headless runs simply omit it instead of guessing a host.
+     */
+    const renderGeneratedAudio = (value) => {
+        if (value.fallback === 'speechSynthesis') {
+            return `${ErrorCode.SpeechSynthesisRequired}: satisfied without a host audio file. Read the returned text with the browser speechSynthesis API. If a file was expected, install or repair edge-tts and retry.`;
+        }
+        const filePath = value.filePath ?? '';
+        const format = value.format ?? '';
+        const absolute = (() => {
+            try {
+                return deps.audioRoute?.absoluteUrlFor?.(filePath);
+            }
+            catch {
+                return undefined;
+            }
+        })();
+        const header = `Generated audio: \`${filePath}\` (${format})`;
+        if (absolute !== undefined) {
+            return `${header}\n[▶ 播放](${absolute})`;
+        }
+        if (value.browserUrl !== undefined) {
+            return `Generated audio: ${filePath} (${format})\nPlayback URL: ${value.browserUrl}`;
+        }
+        return header;
+    };
     const generate = defineTool({
         name: 'tts_generate',
         description: generateDescription(),
@@ -221,11 +249,7 @@ export function createTtsTools(config, deps = {}) {
             render: (_args, value) => [
                 {
                     type: 'text',
-                    text: 'fallback' in value
-                        ? `${ErrorCode.SpeechSynthesisRequired}: satisfied without a host audio file. Read the returned text with the browser speechSynthesis API. If a file was expected, install or repair edge-tts and retry.`
-                        : value.browserUrl
-                            ? `Generated audio: ${value.filePath} (${value.format})\nPlayback URL: ${value.browserUrl}`
-                            : `Generated audio: ${value.filePath} (${value.format})`,
+                    text: renderGeneratedAudio(value),
                 },
             ],
         },
@@ -454,7 +478,22 @@ export function apply(ctx, config) {
             ? serviceOf(ctx, 'httpServer')
             : undefined;
         const server = webServer ?? legacy;
+        // `getOrigin` may throw before the listener binds; then the tool output
+        // stays relative-only rather than advertising a guessed host.
+        const applyOrigin = (registrar) => {
+            try {
+                const origin = registrar.getOrigin?.();
+                if (origin) {
+                    audioRoute.setOrigin(origin);
+                    debug('audio route origin advertised by the host');
+                }
+            }
+            catch {
+                // Intentionally ignored: no origin, no absolute link.
+            }
+        };
         if (server !== undefined) {
+            applyOrigin(server);
             ctx.effect(() => audioRoute.register(server));
         }
         else {
@@ -463,6 +502,7 @@ export function apply(ctx, config) {
                     .webServer;
                 if (!late)
                     return;
+                applyOrigin(late);
                 webCtx.effect(() => audioRoute.register(late));
             });
         }
