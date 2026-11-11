@@ -2,10 +2,18 @@ import { spawn } from 'node:child_process'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AUDIO_FORMAT, outputFilePath } from './cache.ts'
-import { ErrorCode, TtsError, spawnFailure } from './errors.ts'
+import { ErrorCode, TtsError, spawnFailure, looksLikeProtocolDrift } from './errors.ts'
 
 /** Upper bound on captured stderr/stdout text, keeping the tail. */
 const MAX_CAPTURE = 8_000
+
+/** Suggestion for a rejected WebSocket handshake / 403, not a transient stall. */
+const PROTOCOL_DRIFT_SUGGESTION =
+  'Edge-TTS 握手被拒绝（403 / handshake）。这通常意味着上游协议发生了变更（例如 Sec-MS-GEC 令牌代次更新），当前安装的 edge-tts 版本可能无法完成握手。请尝试升级 edge-tts（pip install --upgrade edge-tts），或检查是否需要提高本插件要求的 edge-tts 版本下限；若升级后仍失败，只能等待上游修复或先降级到 SAPI / speechSynthesis。'
+
+/** Suggestion for timeouts and other transient network failures. */
+const NETWORK_SUGGESTION =
+  '若网络正常但持续超时，请检查是否需要对 speech.platform.bing.com:443 配置代理。注意：环境变量 HTTPS_PROXY 对 edge-tts 的 WSS 连接无效，必须通过本插件的 `proxy` 配置项透传 `--proxy` 参数。详见 README 的「已知限制」章节。'
 
 /** Minimal child-process surface used by the runner, kept injectable for tests. */
 export interface ChildStream {
@@ -240,10 +248,14 @@ export async function synthesize(
     if (result.code !== 0) {
       const status = result.code === null ? 'null' : String(result.code)
       const signal = result.signal ? ` (signal ${result.signal})` : ''
+      const drift = looksLikeProtocolDrift(result.stderr)
       throw new TtsError(
         ErrorCode.EdgeTtsFailed,
         `Edge-TTS exited with code ${status}${signal}.${stderrSuffix(result.stderr)}`,
-        'Check the voice and rate values and network connectivity, then run `tts_self_check`. 若网络正常但持续超时，请检查是否需要对 speech.platform.bing.com:443 配置代理。注意：环境变量 HTTPS_PROXY 对 edge-tts 的 WSS 连接无效，必须通过本插件的 `proxy` 配置项透传 `--proxy` 参数。详见 README 的「已知限制」章节。',
+        drift
+          ? PROTOCOL_DRIFT_SUGGESTION
+          : `Check the voice and rate values and network connectivity, then run \`tts_self_check\`. ${NETWORK_SUGGESTION}`,
+        drift ? { protocolDrift: true } : undefined,
       )
     }
 

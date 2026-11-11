@@ -54,6 +54,7 @@ end users. The following behaviors are part of its contract:
 | Sandbox rejection | `spawn` blocked by the sandbox is distinguished from upstream failure | `SPAWN_EPERM` (points to sandbox policy, not filesystem) |
 | Upstream failure | Edge-TTS non-zero exit or network timeout | `EDGE_TTS_FAILED` / `SYNTHESIS_TIMEOUT` |
 | Fallback | On Edge-TTS failure, tries engines in `fallbackOrder`; the response marks the engine actually used | `engine` / `fallback` fields |
+| Engine health | Unhealthy engines are skipped during cooldown; a half-open probe recovers them on success. Protocol drift (403 / handshake rejection) opens the circuit with a longer cooldown than transient failures. | `engineHealth` in `tts_self_check` and `tts_generate` |
 | Cache semantics | Cache key is fixed to `(text, voice, rate)`; `pitch`/`volume` are excluded for predictable cache behavior | See “Known limitations” |
 | Lifecycle | Tools, routes, and config listeners are effect-registered and cleaned up on dispose; HMR-safe | — |
 
@@ -179,6 +180,11 @@ loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessari
 | `totalTimeoutMs` | `180000` | 一次 `tts_generate` 的总预算，覆盖所有分块与块间延迟 | 插件 config 的 `totalTimeoutMs` |
 | `trustedHosts` | `[]` | 反向代理场景的额外 Host 白名单；非空时跳过端口钉死 | 插件 config 的 `trustedHosts` |
 | `proxy` | `undefined` | 为 Edge-TTS 子进程配置 HTTP 代理，透传为 `--proxy`；留空则不追加参数 | 插件 config 的 `proxy` |
+| `engineHealth.enabled` | `true` | 是否启用引擎健康状态机；关闭后每个引擎总是被尝试 | 插件 config 的 `engineHealth.enabled` |
+| `engineHealth.failureThreshold` | `3` | 连续普通失败达到该次数后打开熔断 | 插件 config 的 `engineHealth.failureThreshold` |
+| `engineHealth.driftCooldownMs` | `300000` | 协议漂移（403 / 握手失败）触发的冷却期 | 插件 config 的 `engineHealth.driftCooldownMs` |
+| `engineHealth.transientCooldownMs` | `60000` | 普通失败达到阈值后触发的冷却期 | 插件 config 的 `engineHealth.transientCooldownMs` |
+| `engineHealth.maxCooldownMs` | `600000` | 半开探测失败后冷却时长翻倍的上限 | 插件 config 的 `engineHealth.maxCooldownMs` |
 
 ## 使用
 
@@ -313,6 +319,7 @@ npm run test:integration
 - **不提供音频时长**：输出 schema 不再声明 `durationMs`，需要时长请用外部工具探测。
 - **环境变量代理对 Edge-TTS 无效**：edge-tts 的 WSS 连接不读取 `HTTPS_PROXY` / `https_proxy`，设置环境变量不会生效；必须通过本插件的 `proxy` 配置项透传 `--proxy`。
 - **端点单一，无自动迁移**：edge-tts 7.3.1 只有一个端点 `speech.platform.bing.com`。如果该端点在当前网络不可达，只能通过 `proxy` 或降级到 SAPI / `speechSynthesis`；可用 `tts_probe_network` 做一次 TCP 可达性判断。
+- **引擎健康状态仅存在于内存**：插件重启后重置为 `healthy`。它反映的是最近一次尝试的结果，不是实时探测。如需确认当前网络可达性，请使用 `tts_probe_network`。
 
 ## 错误码
 

@@ -26,11 +26,14 @@ import { ConcurrencyLimiter } from './concurrency.ts'
 import {
   Config,
   DEFAULT_RATE,
+  isTtsEngine,
   requireSynthesisConfig,
   resolveConfig,
   type ResolvedConfig,
   type TtsConfig,
+  type TtsEngine,
 } from './config.ts'
+import { EngineHealthRegistry, type EngineHealthState } from './engine-health.ts'
 import {
   synthesize,
   type SpawnFunction,
@@ -123,6 +126,7 @@ function canonicalAudio(
   audio: SynthesizedAudio,
   audioRoute: AudioUrlProvider | undefined,
   engine?: string,
+  engineHealth?: EngineHealthValue,
 ): AudioValue {
   const browserUrl = audioRoute?.urlFor(audio.filePath)
   return {
@@ -130,6 +134,32 @@ function canonicalAudio(
     format: audio.format,
     ...(browserUrl === undefined ? {} : { browserUrl }),
     ...(engine === undefined ? {} : { engine }),
+    ...(engineHealth === undefined ? {} : { engineHealth }),
+  }
+}
+
+/**
+ * Optional health descriptor attached only when it carries information: a
+ * non-default engine, a non-healthy engine, or a skipped engine. The plain
+ * Edge-TTS success path therefore keeps its historical `{filePath, format}`
+ * shape.
+ */
+function describeEngineHealth(
+  usedEngine: string,
+  usedEngineState: EngineHealthState,
+  skipped: readonly string[],
+): EngineHealthValue | undefined {
+  if (
+    usedEngine === 'edge-tts' &&
+    usedEngineState === 'healthy' &&
+    skipped.length === 0
+  ) {
+    return undefined
+  }
+  return {
+    usedEngine,
+    usedEngineState,
+    ...(skipped.length === 0 ? {} : { skippedEngines: [...skipped] }),
   }
 }
 
@@ -152,6 +182,13 @@ function summarizeAttempts(attempts: readonly FallbackAttempt[]): string {
     .join('; ')
 }
 
+/** Optional engine-health descriptor returned alongside real audio. */
+interface EngineHealthValue {
+  usedEngine: string
+  usedEngineState: EngineHealthState
+  skippedEngines?: string[]
+}
+
 /** Value produced when the host cannot synthesize but the client can speak. */
 interface SpeechSynthesisValue {
   fallback: 'speechSynthesis'
@@ -167,6 +204,7 @@ type AudioValue = {
   format: string
   browserUrl?: string
   engine?: string
+  engineHealth?: EngineHealthValue
 }
 type GenerateValue = AudioValue | SpeechSynthesisValue
 
@@ -180,6 +218,7 @@ interface RenderableValue {
   browserUrl?: string
   fallback?: string
   engine?: string
+  engineHealth?: EngineHealthValue
   text?: string
   voice?: string
   rate?: string
@@ -278,9 +317,19 @@ export function createTtsTools(
       queueTimeoutMs: config.queueTimeoutMs,
     })
   const inFlight = new Map<string, MergeGroup>()
+  // Process-local health only; a plugin restart starts every engine healthy.
+  const health = new EngineHealthRegistry(
+    config.engineHealth,
+    deps.now ?? (() => new Date()),
+  )
 
   type SynthesisOutcome =
-    | { kind: 'audio'; audio: SynthesizedAudio; engine?: string }
+    | {
+        kind: 'audio'
+        audio: SynthesizedAudio
+        engine?: string
+        engineHealth?: EngineHealthValue
+      }
     | { kind: 'speechSynthesis'; reason?: string }
 
   interface MergeGroup {
@@ -355,6 +404,18 @@ export function createTtsTools(
     })
   }
 
+  /**
+   * A cache hit used no engine, so report the state of whichever engine
+   * produced the file (or Edge-TTS for legacy entries without a sidecar).
+   */
+  const healthForCacheHit = (
+    cachedEngineName: string | undefined,
+  ): EngineHealthValue | undefined => {
+    const usedEngine = cachedEngineName ?? 'edge-tts'
+    const state = health.stateOf(isTtsEngine(usedEngine) ? usedEngine : 'edge-tts')
+    return describeEngineHealth(usedEngine, state, [])
+  }
+
   const renderOutcome = (
     outcome: SynthesisOutcome,
     speech: Omit<SpeechSynthesisValue, 'fallback'>,
@@ -368,7 +429,12 @@ export function createTtsTools(
           : { fallbackReason: outcome.reason }),
       }
     }
-    return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine)
+    return canonicalAudio(
+      outcome.audio,
+      deps.audioRoute,
+      outcome.engine,
+      outcome.engineHealth,
+    )
   }
 
   /**
@@ -477,6 +543,33 @@ export function createTtsTools(
             description:
               'Condensed per-engine failure summary, returned only when `fallback` is `speechSynthesis`. Contains engine names, error codes and truncated stderr; never user text, tokens or absolute paths.',
           },
+          engineHealth: {
+            type: 'object',
+            additionalProperties: false,
+            description:
+              'Optional in-memory health snapshot for this call. Omitted on the plain healthy Edge-TTS path. Reflects the last observed attempt, not a live network probe.',
+            properties: {
+              usedEngine: {
+                type: 'string',
+                required: true,
+                description:
+                  'Engine that produced this audio, for example `edge-tts` or `sapi`.',
+              },
+              usedEngineState: {
+                type: 'string',
+                required: true,
+                enum: ['healthy', 'degraded', 'open'],
+                description:
+                  'Health of `usedEngine` just before this attempt succeeded.',
+              },
+              skippedEngines: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Engines skipped for this attempt because their cooldown circuit was open.',
+              },
+            },
+          },
         },
         additionalProperties: false,
       },
@@ -517,10 +610,12 @@ export function createTtsTools(
 
       const cached = await findCachedFile(outputDir, hash)
       if (cached !== undefined) {
+        const engine = await cachedEngine(cached)
         return canonicalAudio(
           { filePath: cached, format: AUDIO_FORMAT },
           deps.audioRoute,
-          await cachedEngine(cached),
+          engine,
+          healthForCacheHit(engine),
         )
       }
 
@@ -541,10 +636,13 @@ export function createTtsTools(
         // A request that waited for a slot may find the file already produced.
         const ready = await findCachedFile(outputDir, hash)
         if (ready !== undefined) {
+          const engine = await cachedEngine(ready)
+          const engineHealth = healthForCacheHit(engine)
           return {
             kind: 'audio',
             audio: { filePath: ready, format: AUDIO_FORMAT },
-            engine: await cachedEngine(ready),
+            ...(engine === undefined ? {} : { engine }),
+            ...(engineHealth === undefined ? {} : { engineHealth }),
           }
         }
 
@@ -582,14 +680,19 @@ export function createTtsTools(
                 now: deps.now?.(),
               })
 
-        try {
-          const audio = await primary()
-          await recordMetadata(audio, 'edge-tts', settings)
-          return { kind: 'audio', audio }
-        } catch (error) {
-          // Validation, config, cache, and abort errors never fall back.
-          if (!fallbackEnabled || !isFallbackEligible(error)) throw error
+        // Health only removes engines from this attempt; the order below is
+        // still the configured chain, and an all-open chain forces its last
+        // engine through instead of returning an empty result.
+        const chain: readonly TtsEngine[] = fallbackEnabled
+          ? ['edge-tts', ...fallbackOrder.filter((name) => name !== 'edge-tts')]
+          : ['edge-tts']
+        const plan = health.plan(chain)
+        const skipped: string[] = [...plan.skip]
+        const primarySkipped = plan.skip.has('edge-tts')
 
+        const runChain = async (
+          primaryError?: unknown,
+        ): Promise<SynthesisOutcome> => {
           const started = Date.now()
           const outcome = await runFallback(
             {
@@ -601,7 +704,14 @@ export function createTtsTools(
               fallbackOrder,
               signal: controller.signal,
               now: deps.now?.(),
-              primaryError: error,
+              ...(primaryError === undefined ? {} : { primaryError }),
+              ...(primarySkipped
+                ? {
+                    primaryReason:
+                      'primary engine skipped: circuit open (cooldown)',
+                  }
+                : {}),
+              skip: plan.skip,
             },
             {
               platform: deps.platform,
@@ -609,6 +719,7 @@ export function createTtsTools(
               powershellBinary: deps.powershellBinary,
               ffmpegBinary: deps.ffmpegBinary,
               synthesizeSapiImpl: deps.sapiSynthesize,
+              health,
             },
           )
           deps.log?.(
@@ -622,11 +733,41 @@ export function createTtsTools(
             }
           }
           await recordMetadata(outcome.audio, outcome.engine, settings)
+          const engineHealth = describeEngineHealth(
+            outcome.engine,
+            outcome.engineState,
+            skipped,
+          )
           return {
             kind: 'audio',
             audio: outcome.audio,
             engine: outcome.engine,
+            ...(engineHealth === undefined ? {} : { engineHealth }),
           }
+        }
+
+        if (primarySkipped) return await runChain()
+
+        try {
+          const audio = await primary()
+          const engineState = health.stateOf('edge-tts')
+          health.recordSuccess('edge-tts')
+          await recordMetadata(audio, 'edge-tts', settings)
+          const engineHealth = describeEngineHealth(
+            'edge-tts',
+            engineState,
+            skipped,
+          )
+          return {
+            kind: 'audio',
+            audio,
+            ...(engineHealth === undefined ? {} : { engineHealth }),
+          }
+        } catch (error) {
+          health.recordFailure('edge-tts', error)
+          // Validation, config, cache, and abort errors never fall back.
+          if (!fallbackEnabled || !isFallbackEligible(error)) throw error
+          return await runChain(error)
         }
       }, controller.signal)
 
@@ -701,6 +842,13 @@ export function createTtsTools(
             description:
               'Static list of documented voice names; no network query is performed.',
           },
+          engineHealth: {
+            type: 'object',
+            required: true,
+            additionalProperties: true,
+            description:
+              'In-memory per-engine health snapshot keyed by engine name, with `state` and `consecutiveFailures` (plus `lastErrorCode` after a failure). It is not a live probe: tts_self_check performs no network requests.',
+          },
         },
         additionalProperties: false,
       },
@@ -708,13 +856,18 @@ export function createTtsTools(
         { type: 'text' as const, text: JSON.stringify(value, null, 2) },
       ],
     },
-    async execute(_args, exec): Promise<SelfCheckResult & { availableVoices: string[] }> {
+    async execute(_args, exec) {
       const result = await selfCheck({
         config,
         signal: exec.signal,
         spawnImpl: deps.spawnImpl,
+        engineHealth: () => health.snapshot(),
       })
-      return { ...result, availableVoices: [...AVAILABLE_VOICES] }
+      return {
+        ...result,
+        availableVoices: [...AVAILABLE_VOICES],
+        engineHealth: result.engineHealth ?? health.snapshot(),
+      }
     },
   })
 

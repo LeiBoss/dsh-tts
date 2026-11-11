@@ -1,6 +1,7 @@
 import { constants } from 'node:fs'
 import { access, mkdir } from 'node:fs/promises'
 import { runProcess, type SpawnFunction } from './edge-tts.ts'
+import type { EngineHealthSnapshot } from './engine-health.ts'
 import { ErrorCode, TtsError } from './errors.ts'
 import type { ResolvedConfig } from './config.ts'
 
@@ -13,6 +14,11 @@ export interface SelfCheckResult {
   dshHome: string
   /** Whether a proxy is configured for the Edge-TTS subprocess. */
   proxyConfigured: boolean
+  /**
+   * In-memory engine health snapshot. Present only when the caller supplies a
+   * provider; it is never produced by probing the network here.
+   */
+  engineHealth?: Record<string, EngineHealthSnapshot>
 }
 
 /** Injection points for the self-check. */
@@ -20,6 +26,8 @@ export interface SelfCheckOptions {
   config: ResolvedConfig
   signal?: AbortSignal
   spawnImpl?: SpawnFunction
+  /** Pure snapshot provider; must not perform I/O. */
+  engineHealth?: () => Record<string, EngineHealthSnapshot>
 }
 
 /** Version-looking token printed by `edge-tts --version`. */
@@ -90,5 +98,8 @@ export async function selfCheck(options: SelfCheckOptions): Promise<SelfCheckRes
     outputDirWritable,
     dshHome: config.dshHome,
     proxyConfigured: config.proxy !== undefined,
+    ...(options.engineHealth === undefined
+      ? {}
+      : { engineHealth: options.engineHealth() }),
   }
 }

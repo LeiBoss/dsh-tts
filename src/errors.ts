@@ -28,6 +28,31 @@ export const ErrorCode = {
 export type TtsErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
 /**
+ * Substrings that mean the upstream Edge-TTS protocol changed under us: a
+ * rejected WebSocket handshake, a rotated `Sec-MS-GEC` token generation, or a
+ * generic HTTP 403. These are not retryable jitter — the installed edge-tts
+ * version and the service disagree about the handshake.
+ */
+const PROTOCOL_DRIFT_PATTERNS: readonly RegExp[] = [
+  /403/,
+  /invalid response status/i,
+  /wsserverhandshakeerror/i,
+  /sec-ms-gec/i,
+  /handshake/i,
+]
+
+/** Whether captured subprocess output looks like protocol drift, not jitter. */
+export function looksLikeProtocolDrift(text: string): boolean {
+  return PROTOCOL_DRIFT_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+/** Options accepted by {@link TtsError}. */
+export interface TtsErrorOptions extends ErrorOptions {
+  /** Marks a failure caused by upstream protocol drift rather than jitter. */
+  protocolDrift?: boolean
+}
+
+/**
  * Structured plugin error: a routable `code`, a human-readable message, and an
  * actionable suggestion. Extends the harness error base so the tool registry
  * can retain the code in its failure metadata.
@@ -37,13 +62,31 @@ export class TtsError extends HarnessError {
   readonly detail: string
   /** Action the caller (or the user) can take to resolve the failure. */
   readonly suggestion?: string
+  /** Set when the failure is a handshake/protocol rejection, not a timeout. */
+  readonly protocolDrift: boolean
 
-  constructor(code: TtsErrorCode, message: string, suggestion?: string, options?: ErrorOptions) {
+  constructor(
+    code: TtsErrorCode,
+    message: string,
+    suggestion?: string,
+    options?: TtsErrorOptions,
+  ) {
     super(suggestion ? `${message}\nSuggestion: ${suggestion}` : message, code, options)
     this.name = 'TtsError'
     this.detail = message
     this.suggestion = suggestion
+    this.protocolDrift = options?.protocolDrift === true
   }
+}
+
+/**
+ * Classify a failure as protocol drift. The explicit flag wins; the text
+ * fallback keeps errors re-wrapped by callers (for example per-chunk failures)
+ * classifiable without extra plumbing.
+ */
+export function isProtocolDrift(error: unknown): boolean {
+  if (!(error instanceof TtsError)) return false
+  return error.protocolDrift || looksLikeProtocolDrift(error.detail)
 }
 
 /** Read a Node `SystemError` code without assuming the thrown value's shape. */

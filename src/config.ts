@@ -1,6 +1,10 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import z from '@deepseek-ai/schemastery'
+import {
+  DEFAULT_ENGINE_HEALTH,
+  type EngineHealthConfig,
+} from './engine-health.ts'
 import { ErrorCode, TtsError } from './errors.ts'
 
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
@@ -76,6 +80,19 @@ export const Config = z.object({
   totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
   trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
   proxy: z.string(),
+  engineHealth: z
+    .object({
+      enabled: z.boolean().default(DEFAULT_ENGINE_HEALTH.enabled),
+      failureThreshold: z
+        .number()
+        .default(DEFAULT_ENGINE_HEALTH.failureThreshold),
+      driftCooldownMs: z.number().default(DEFAULT_ENGINE_HEALTH.driftCooldownMs),
+      transientCooldownMs: z
+        .number()
+        .default(DEFAULT_ENGINE_HEALTH.transientCooldownMs),
+      maxCooldownMs: z.number().default(DEFAULT_ENGINE_HEALTH.maxCooldownMs),
+    })
+    .default({ ...DEFAULT_ENGINE_HEALTH }),
 })
 
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
@@ -95,6 +112,8 @@ export interface TtsConfig {
   trustedHosts?: string[]
   /** HTTP proxy forwarded to edge-tts as `--proxy`; no env fallback. */
   proxy?: string
+  /** Engine health state machine tunables; omitted fields use defaults. */
+  engineHealth?: Partial<EngineHealthConfig>
 }
 
 /** Effective, path-resolved plugin settings. */
@@ -118,11 +137,28 @@ export interface ResolvedConfig {
   trustedHosts: string[]
   /** Undefined when unset; deliberately never read from the environment. */
   proxy?: string
+  /** Fully resolved engine health settings. */
+  engineHealth: EngineHealthConfig
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
+}
+
+function resolveEngineHealth(
+  raw?: Partial<EngineHealthConfig>,
+): EngineHealthConfig {
+  return {
+    enabled: raw?.enabled ?? DEFAULT_ENGINE_HEALTH.enabled,
+    failureThreshold:
+      raw?.failureThreshold ?? DEFAULT_ENGINE_HEALTH.failureThreshold,
+    driftCooldownMs:
+      raw?.driftCooldownMs ?? DEFAULT_ENGINE_HEALTH.driftCooldownMs,
+    transientCooldownMs:
+      raw?.transientCooldownMs ?? DEFAULT_ENGINE_HEALTH.transientCooldownMs,
+    maxCooldownMs: raw?.maxCooldownMs ?? DEFAULT_ENGINE_HEALTH.maxCooldownMs,
+  }
 }
 
 /**
@@ -163,6 +199,7 @@ export function resolveConfig(
       .map((host) => host.trim().toLowerCase())
       .filter((host) => host.length > 0),
     proxy: nonEmpty(raw?.proxy),
+    engineHealth: resolveEngineHealth(raw?.engineHealth),
   }
 }
 
@@ -183,6 +220,7 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
   totalTimeoutMs: number
   trustedHosts: string[]
   proxy?: string
+  engineHealth: EngineHealthConfig
 } {
   if (!config.outputDir) {
     throw new TtsError(
@@ -239,6 +277,27 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
       'Set `totalTimeoutMs` to a positive millisecond value (default 180000).',
     )
   }
+  const health = config.engineHealth
+  if (!Number.isInteger(health.failureThreshold) || health.failureThreshold < 1) {
+    throw new TtsError(
+      ErrorCode.InvalidConfig,
+      `Invalid config: engineHealth.failureThreshold must be a positive integer, got ${JSON.stringify(health.failureThreshold)}.`,
+      'Set `engineHealth.failureThreshold` to at least 1 (default 3).',
+    )
+  }
+  for (const [field, value] of [
+    ['driftCooldownMs', health.driftCooldownMs],
+    ['transientCooldownMs', health.transientCooldownMs],
+    ['maxCooldownMs', health.maxCooldownMs],
+  ] as const) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new TtsError(
+        ErrorCode.InvalidConfig,
+        `Invalid config: engineHealth.${field} must be a positive number, got ${JSON.stringify(value)}.`,
+        `Set \`engineHealth.${field}\` to a positive millisecond value.`,
+      )
+    }
+  }
   return {
     outputDir: config.outputDir,
     timeoutMs: config.timeoutMs,
@@ -252,5 +311,6 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
     totalTimeoutMs: config.totalTimeoutMs,
     trustedHosts: config.trustedHosts,
     proxy: config.proxy,
+    engineHealth: health,
   }
 }

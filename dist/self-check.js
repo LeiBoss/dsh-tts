@@ -67,6 +67,9 @@ export async function selfCheck(options) {
         outputDirWritable,
         dshHome: config.dshHome,
         proxyConfigured: config.proxy !== undefined,
+        ...(options.engineHealth === undefined
+            ? {}
+            : { engineHealth: options.engineHealth() }),
     };
 }
 //# sourceMappingURL=self-check.js.map

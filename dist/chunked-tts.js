@@ -22,7 +22,7 @@ function sleep(ms) {
 }
 function chunkFailure(index, total, error) {
     if (error instanceof TtsError) {
-        return new TtsError(error.code, `Chunk ${index + 1}/${total} failed: ${error.detail}`, error.suggestion, { cause: error });
+        return new TtsError(error.code, `Chunk ${index + 1}/${total} failed: ${error.detail}`, error.suggestion, { cause: error, protocolDrift: error.protocolDrift });
     }
     const detail = error instanceof Error ? error.message : String(error);
     return new TtsError(ErrorCode.EdgeTtsFailed, `Chunk ${index + 1}/${total} failed: ${detail}`, 'Retry the call; if it persists, run `tts_self_check` and inspect Edge-TTS output.', { cause: error });

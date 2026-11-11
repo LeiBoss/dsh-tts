@@ -3,7 +3,8 @@ import { AudioRoute, } from "./audio-route.js";
 import { AUDIO_FORMAT, cacheKey, findCachedFile, readCacheMetadata, writeCacheMetadata, } from "./cache.js";
 import { synthesizeChunked } from "./chunked-tts.js";
 import { ConcurrencyLimiter } from "./concurrency.js";
-import { Config, DEFAULT_RATE, requireSynthesisConfig, resolveConfig, } from "./config.js";
+import { Config, DEFAULT_RATE, isTtsEngine, requireSynthesisConfig, resolveConfig, } from "./config.js";
+import { EngineHealthRegistry } from "./engine-health.js";
 import { synthesize, } from "./edge-tts.js";
 import { ErrorCode, TtsError } from "./errors.js";
 import { isFallbackEligible, runFallback } from "./fallback.js";
@@ -45,13 +46,32 @@ export const DEFAULT_VOLUME = '+0%';
  * appear; `browserUrl` is omitted when the host offers no web route and
  * `engine` is omitted when the default Edge-TTS path produced the file.
  */
-function canonicalAudio(audio, audioRoute, engine) {
+function canonicalAudio(audio, audioRoute, engine, engineHealth) {
     const browserUrl = audioRoute?.urlFor(audio.filePath);
     return {
         filePath: audio.filePath,
         format: audio.format,
         ...(browserUrl === undefined ? {} : { browserUrl }),
         ...(engine === undefined ? {} : { engine }),
+        ...(engineHealth === undefined ? {} : { engineHealth }),
+    };
+}
+/**
+ * Optional health descriptor attached only when it carries information: a
+ * non-default engine, a non-healthy engine, or a skipped engine. The plain
+ * Edge-TTS success path therefore keeps its historical `{filePath, format}`
+ * shape.
+ */
+function describeEngineHealth(usedEngine, usedEngineState, skipped) {
+    if (usedEngine === 'edge-tts' &&
+        usedEngineState === 'healthy' &&
+        skipped.length === 0) {
+        return undefined;
+    }
+    return {
+        usedEngine,
+        usedEngineState,
+        ...(skipped.length === 0 ? {} : { skippedEngines: [...skipped] }),
     };
 }
 /**
@@ -131,6 +151,8 @@ export function createTtsTools(config, deps = {}) {
             queueTimeoutMs: config.queueTimeoutMs,
         });
     const inFlight = new Map();
+    // Process-local health only; a plugin restart starts every engine healthy.
+    const health = new EngineHealthRegistry(config.engineHealth, deps.now ?? (() => new Date()));
     /**
      * Wait for a shared synthesis with a per-caller abort. A caller that gives
      * up only removes itself; the underlying task is aborted when the last
@@ -173,6 +195,15 @@ export function createTtsTools(config, deps = {}) {
             createdAt: new Date().toISOString(),
         });
     };
+    /**
+     * A cache hit used no engine, so report the state of whichever engine
+     * produced the file (or Edge-TTS for legacy entries without a sidecar).
+     */
+    const healthForCacheHit = (cachedEngineName) => {
+        const usedEngine = cachedEngineName ?? 'edge-tts';
+        const state = health.stateOf(isTtsEngine(usedEngine) ? usedEngine : 'edge-tts');
+        return describeEngineHealth(usedEngine, state, []);
+    };
     const renderOutcome = (outcome, speech) => {
         if (outcome.kind === 'speechSynthesis') {
             return {
@@ -183,7 +214,7 @@ export function createTtsTools(config, deps = {}) {
                     : { fallbackReason: outcome.reason }),
             };
         }
-        return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine);
+        return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine, outcome.engineHealth);
     };
     /**
      * Human-readable tool output. The JSON contract keeps `browserUrl` relative;
@@ -282,6 +313,29 @@ export function createTtsTools(config, deps = {}) {
                         type: 'string',
                         description: 'Condensed per-engine failure summary, returned only when `fallback` is `speechSynthesis`. Contains engine names, error codes and truncated stderr; never user text, tokens or absolute paths.',
                     },
+                    engineHealth: {
+                        type: 'object',
+                        additionalProperties: false,
+                        description: 'Optional in-memory health snapshot for this call. Omitted on the plain healthy Edge-TTS path. Reflects the last observed attempt, not a live network probe.',
+                        properties: {
+                            usedEngine: {
+                                type: 'string',
+                                required: true,
+                                description: 'Engine that produced this audio, for example `edge-tts` or `sapi`.',
+                            },
+                            usedEngineState: {
+                                type: 'string',
+                                required: true,
+                                enum: ['healthy', 'degraded', 'open'],
+                                description: 'Health of `usedEngine` just before this attempt succeeded.',
+                            },
+                            skippedEngines: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Engines skipped for this attempt because their cooldown circuit was open.',
+                            },
+                        },
+                    },
                 },
                 additionalProperties: false,
             },
@@ -308,7 +362,8 @@ export function createTtsTools(config, deps = {}) {
             const settings = { voice, rate, pitch, volume };
             const cached = await findCachedFile(outputDir, hash);
             if (cached !== undefined) {
-                return canonicalAudio({ filePath: cached, format: AUDIO_FORMAT }, deps.audioRoute, await cachedEngine(cached));
+                const engine = await cachedEngine(cached);
+                return canonicalAudio({ filePath: cached, format: AUDIO_FORMAT }, deps.audioRoute, engine, healthForCacheHit(engine));
             }
             // Identical in-flight requests share one synthesis; they never consume
             // another slot. Different pitch/volume share the key by design, matching
@@ -326,10 +381,13 @@ export function createTtsTools(config, deps = {}) {
                 // A request that waited for a slot may find the file already produced.
                 const ready = await findCachedFile(outputDir, hash);
                 if (ready !== undefined) {
+                    const engine = await cachedEngine(ready);
+                    const engineHealth = healthForCacheHit(engine);
                     return {
                         kind: 'audio',
                         audio: { filePath: ready, format: AUDIO_FORMAT },
-                        engine: await cachedEngine(ready),
+                        ...(engine === undefined ? {} : { engine }),
+                        ...(engineHealth === undefined ? {} : { engineHealth }),
                     };
                 }
                 const primary = async () => chunkingEnabled && text.length > chunkSize
@@ -364,15 +422,16 @@ export function createTtsTools(config, deps = {}) {
                         spawnImpl: deps.spawnImpl,
                         now: deps.now?.(),
                     });
-                try {
-                    const audio = await primary();
-                    await recordMetadata(audio, 'edge-tts', settings);
-                    return { kind: 'audio', audio };
-                }
-                catch (error) {
-                    // Validation, config, cache, and abort errors never fall back.
-                    if (!fallbackEnabled || !isFallbackEligible(error))
-                        throw error;
+                // Health only removes engines from this attempt; the order below is
+                // still the configured chain, and an all-open chain forces its last
+                // engine through instead of returning an empty result.
+                const chain = fallbackEnabled
+                    ? ['edge-tts', ...fallbackOrder.filter((name) => name !== 'edge-tts')]
+                    : ['edge-tts'];
+                const plan = health.plan(chain);
+                const skipped = [...plan.skip];
+                const primarySkipped = plan.skip.has('edge-tts');
+                const runChain = async (primaryError) => {
                     const started = Date.now();
                     const outcome = await runFallback({
                         text,
@@ -383,13 +442,20 @@ export function createTtsTools(config, deps = {}) {
                         fallbackOrder,
                         signal: controller.signal,
                         now: deps.now?.(),
-                        primaryError: error,
+                        ...(primaryError === undefined ? {} : { primaryError }),
+                        ...(primarySkipped
+                            ? {
+                                primaryReason: 'primary engine skipped: circuit open (cooldown)',
+                            }
+                            : {}),
+                        skip: plan.skip,
                     }, {
                         platform: deps.platform,
                         spawnImpl: deps.spawnImpl,
                         powershellBinary: deps.powershellBinary,
                         ffmpegBinary: deps.ffmpegBinary,
                         synthesizeSapiImpl: deps.sapiSynthesize,
+                        health,
                     });
                     deps.log?.(`fallback engine=${outcome.engine} elapsedMs=${Date.now() - started}`);
                     if (outcome.kind === 'speechSynthesis') {
@@ -399,11 +465,34 @@ export function createTtsTools(config, deps = {}) {
                         };
                     }
                     await recordMetadata(outcome.audio, outcome.engine, settings);
+                    const engineHealth = describeEngineHealth(outcome.engine, outcome.engineState, skipped);
                     return {
                         kind: 'audio',
                         audio: outcome.audio,
                         engine: outcome.engine,
+                        ...(engineHealth === undefined ? {} : { engineHealth }),
                     };
+                };
+                if (primarySkipped)
+                    return await runChain();
+                try {
+                    const audio = await primary();
+                    const engineState = health.stateOf('edge-tts');
+                    health.recordSuccess('edge-tts');
+                    await recordMetadata(audio, 'edge-tts', settings);
+                    const engineHealth = describeEngineHealth('edge-tts', engineState, skipped);
+                    return {
+                        kind: 'audio',
+                        audio,
+                        ...(engineHealth === undefined ? {} : { engineHealth }),
+                    };
+                }
+                catch (error) {
+                    health.recordFailure('edge-tts', error);
+                    // Validation, config, cache, and abort errors never fall back.
+                    if (!fallbackEnabled || !isFallbackEligible(error))
+                        throw error;
+                    return await runChain(error);
                 }
             }, controller.signal);
             const group = {
@@ -472,6 +561,12 @@ export function createTtsTools(config, deps = {}) {
                         required: true,
                         description: 'Static list of documented voice names; no network query is performed.',
                     },
+                    engineHealth: {
+                        type: 'object',
+                        required: true,
+                        additionalProperties: true,
+                        description: 'In-memory per-engine health snapshot keyed by engine name, with `state` and `consecutiveFailures` (plus `lastErrorCode` after a failure). It is not a live probe: tts_self_check performs no network requests.',
+                    },
                 },
                 additionalProperties: false,
             },
@@ -484,8 +579,13 @@ export function createTtsTools(config, deps = {}) {
                 config,
                 signal: exec.signal,
                 spawnImpl: deps.spawnImpl,
+                engineHealth: () => health.snapshot(),
             });
-            return { ...result, availableVoices: [...AVAILABLE_VOICES] };
+            return {
+                ...result,
+                availableVoices: [...AVAILABLE_VOICES],
+                engineHealth: result.engineHealth ?? health.snapshot(),
+            };
         },
     });
     const probe = defineTool({

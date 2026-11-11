@@ -1,4 +1,5 @@
 import z from '@deepseek-ai/schemastery';
+import { type EngineHealthConfig } from './engine-health.ts';
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
 export declare const DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural";
 /** Rate Edge-TTS uses when the call omits one. */
@@ -50,6 +51,19 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     totalTimeoutMs: z<number, number, "defined">;
     trustedHosts: z<string[], string[], "defined">;
     proxy: z<string, string, "plain">;
+    engineHealth: z<Schemastery.ObjectS<NoInfer<{
+        enabled: z<boolean, boolean, "defined">;
+        failureThreshold: z<number, number, "defined">;
+        driftCooldownMs: z<number, number, "defined">;
+        transientCooldownMs: z<number, number, "defined">;
+        maxCooldownMs: z<number, number, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        enabled: z<boolean, boolean, "defined">;
+        failureThreshold: z<number, number, "defined">;
+        driftCooldownMs: z<number, number, "defined">;
+        transientCooldownMs: z<number, number, "defined">;
+        maxCooldownMs: z<number, number, "defined">;
+    }>>, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     outputDir: z<string, string, "plain">;
     defaultVoice: z<string, string, "defined">;
@@ -65,6 +79,19 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     totalTimeoutMs: z<number, number, "defined">;
     trustedHosts: z<string[], string[], "defined">;
     proxy: z<string, string, "plain">;
+    engineHealth: z<Schemastery.ObjectS<NoInfer<{
+        enabled: z<boolean, boolean, "defined">;
+        failureThreshold: z<number, number, "defined">;
+        driftCooldownMs: z<number, number, "defined">;
+        transientCooldownMs: z<number, number, "defined">;
+        maxCooldownMs: z<number, number, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        enabled: z<boolean, boolean, "defined">;
+        failureThreshold: z<number, number, "defined">;
+        driftCooldownMs: z<number, number, "defined">;
+        transientCooldownMs: z<number, number, "defined">;
+        maxCooldownMs: z<number, number, "defined">;
+    }>>, "defined">;
 }>>, "plain">;
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
 export interface TtsConfig {
@@ -83,6 +110,8 @@ export interface TtsConfig {
     trustedHosts?: string[];
     /** HTTP proxy forwarded to edge-tts as `--proxy`; no env fallback. */
     proxy?: string;
+    /** Engine health state machine tunables; omitted fields use defaults. */
+    engineHealth?: Partial<EngineHealthConfig>;
 }
 /** Effective, path-resolved plugin settings. */
 export interface ResolvedConfig {
@@ -105,6 +134,8 @@ export interface ResolvedConfig {
     trustedHosts: string[];
     /** Undefined when unset; deliberately never read from the environment. */
     proxy?: string;
+    /** Fully resolved engine health settings. */
+    engineHealth: EngineHealthConfig;
 }
 /**
  * Resolve config defaults without touching the filesystem. A missing
@@ -129,5 +160,6 @@ export declare function requireSynthesisConfig(config: ResolvedConfig): {
     totalTimeoutMs: number;
     trustedHosts: string[];
     proxy?: string;
+    engineHealth: EngineHealthConfig;
 };
 //# sourceMappingURL=config.d.ts.map
