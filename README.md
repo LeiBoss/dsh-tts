@@ -1,6 +1,6 @@
 # dsh-tts
 
-npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与本项目无关。
+npm 包名为 `@leiboss/dsh-tts`。
 
 [![npm](https://img.shields.io/npm/v/@leiboss/dsh-tts.svg)](https://www.npmjs.com/package/@leiboss/dsh-tts)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -88,8 +88,6 @@ deciding whether to depend on this plugin.
 dsh plugin --profile web add @leiboss/dsh-tts        # 发布后
 dsh plugin --profile web add github:leiboss/dsh-tts  # 发布前/备用
 ```
-
-> 警告：npm 上的裸名 `dsh-tts` 属于其他维护者，与本项目无关，请勿安装。
 
 从旧版本迁移：旧依赖目录名是 `dsh-tts`，与新的 scoped 包名不匹配，必须先移除再安装，否则会残留 `Cannot find module 'dsh-tts'` 或工具重名：
 
