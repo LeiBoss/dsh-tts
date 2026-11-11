@@ -3,14 +3,14 @@
   "version": "0.2.0",
   "description": "Text-to-speech plugin for DSH: Edge-TTS, multi-voice, chunked long-text synthesis, and fallback chain.",
   "license": "MIT",
-  "author": "LeiBoss",
+  "author": "leiboss",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LeiBoss/dsh-tts.git"
+    "url": "git+https://github.com/leiboss/dsh-tts.git"
   },
-  "homepage": "https://github.com/LeiBoss/dsh-tts#readme",
+  "homepage": "https://github.com/leiboss/dsh-tts#readme",
   "bugs": {
-    "url": "https://github.com/LeiBoss/dsh-tts/issues"
+    "url": "https://github.com/leiboss/dsh-tts/issues"
   },
   "keywords": [
     "dsh-plugin",

@@ -62,7 +62,7 @@ dsh plugin --profile web add dsh-tts
 GitHub 备选：
 
 ```bash
-dsh plugin --profile web add github:LeiBoss/dsh-tts
+dsh plugin --profile web add github:leiboss/dsh-tts
 ```
 
 仓库包含编译产物 `dist/`。如果从源码工作，先执行：
