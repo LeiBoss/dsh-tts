@@ -635,7 +635,7 @@ function serviceOf<T>(ctx: Context, name: string): T | undefined {
 export function apply(ctx: Context, config?: Partial<TtsConfig>): void {
   const resolved = resolveConfig(config)
   const logger =
-    typeof ctx.logger === 'function' ? ctx.logger('dsh-tts') : undefined
+    typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-tts') : undefined
   const debug = (message: string): void => {
     logger?.debug(message)
   }

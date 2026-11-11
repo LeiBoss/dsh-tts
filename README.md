@@ -1,15 +1,17 @@
 # dsh-tts
 
+npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与本项目无关。
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 > Text-to-speech plugin for DSH. Edge-TTS engine, multi-voice, chunked long-text
 > synthesis, fallback chain. Returns playable audio files with browser-accessible URLs.
 
-**Install:** `dsh plugin --profile web add dsh-tts`
+**Install:** `dsh plugin --profile web add @leiboss/dsh-tts`
 
 ## 简介
 
-`dsh-tts` 是一个 DSH 工具插件：把文本合成为音频文件，返回本地路径与可选的同源播放地址。它不是播放器，不做语音转写，也不做音色克隆。
+`@leiboss/dsh-tts` 是一个 DSH 工具插件：把文本合成为音频文件，返回本地路径与可选的同源播放地址。它不是播放器，不做语音转写，也不做音色克隆。
 
 核心特性：
 
@@ -59,13 +61,17 @@
 首选 npm（包发布后可用）：
 
 ```bash
-dsh plugin --profile web add dsh-tts
+dsh plugin --profile web add @leiboss/dsh-tts        # 发布后
+dsh plugin --profile web add github:leiboss/dsh-tts  # 发布前/备用
 ```
 
-GitHub 备选：
+> 警告：npm 上的裸名 `dsh-tts` 属于其他维护者，与本项目无关，请勿安装。
+
+从旧版本迁移：旧依赖目录名是 `dsh-tts`，与新的 scoped 包名不匹配，必须先移除再安装，否则会残留 `Cannot find module 'dsh-tts'` 或工具重名：
 
 ```bash
-dsh plugin --profile web add github:leiboss/dsh-tts
+dsh plugin --profile web remove dsh-tts
+dsh plugin --profile web add @leiboss/dsh-tts
 ```
 
 仓库包含编译产物 `dist/`。如果从源码工作，先执行：

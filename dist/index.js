@@ -432,7 +432,7 @@ function serviceOf(ctx, name) {
  */
 export function apply(ctx, config) {
     const resolved = resolveConfig(config);
-    const logger = typeof ctx.logger === 'function' ? ctx.logger('dsh-tts') : undefined;
+    const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-tts') : undefined;
     const debug = (message) => {
         logger?.debug(message);
     };

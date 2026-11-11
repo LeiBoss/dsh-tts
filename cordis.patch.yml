@@ -1,4 +1,4 @@
 - insert:
     - id: dsh-tts
-      name: 'dsh-tts'
+      name: '@leiboss/dsh-tts'
       config: {}

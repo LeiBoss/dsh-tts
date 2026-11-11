@@ -1,5 +1,5 @@
 {
-  "name": "dsh-tts",
+  "name": "@leiboss/dsh-tts",
   "version": "0.2.0",
   "description": "Text-to-speech plugin for DSH: Edge-TTS, multi-voice, chunked long-text synthesis, and fallback chain.",
   "license": "MIT",
