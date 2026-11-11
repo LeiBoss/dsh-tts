@@ -1,0 +1,86 @@
+import { HarnessError } from '@deepseek-ai/dsh-llm'
+
+/**
+ * Stable, machine-readable failure codes. Callers route on these codes instead
+ * of parsing human-facing messages.
+ */
+export const ErrorCode = {
+  EmptyText: 'EMPTY_TEXT',
+  InvalidVoice: 'INVALID_VOICE',
+  InvalidRate: 'INVALID_RATE',
+  InvalidConfig: 'INVALID_CONFIG',
+  DshHomeNotSet: 'DSH_HOME_NOT_SET',
+  OutputDirNotWritable: 'OUTPUT_DIR_NOT_WRITABLE',
+  EdgeTtsNotFound: 'EDGE_TTS_NOT_FOUND',
+  SpawnEperm: 'SPAWN_EPERM',
+  SpawnFailed: 'SPAWN_FAILED',
+  EdgeTtsFailed: 'EDGE_TTS_FAILED',
+  SynthesisTimeout: 'SYNTHESIS_TIMEOUT',
+  EmptyAudio: 'EMPTY_AUDIO',
+  Aborted: 'ABORTED',
+} as const
+
+export type TtsErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
+
+/**
+ * Structured plugin error: a routable `code`, a human-readable message, and an
+ * actionable suggestion. Extends the harness error base so the tool registry
+ * can retain the code in its failure metadata.
+ */
+export class TtsError extends HarnessError {
+  /** Pre-suggestion message, kept verbatim for structured consumers. */
+  readonly detail: string
+  /** Action the caller (or the user) can take to resolve the failure. */
+  readonly suggestion?: string
+
+  constructor(code: TtsErrorCode, message: string, suggestion?: string, options?: ErrorOptions) {
+    super(suggestion ? `${message}\nSuggestion: ${suggestion}` : message, code, options)
+    this.name = 'TtsError'
+    this.detail = message
+    this.suggestion = suggestion
+  }
+}
+
+/** Read a Node `SystemError` code without assuming the thrown value's shape. */
+export function errnoCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code
+    if (typeof code === 'string') return code
+  }
+  return undefined
+}
+
+/**
+ * Translate a failed `spawn()` attempt into a structured error. `EPERM` is
+ * deliberately distinct: it means the sandbox refused process creation, not
+ * that the output directory is unwritable.
+ */
+export function spawnFailure(error: unknown): TtsError {
+  const code = errnoCode(error)
+  const detail = error instanceof Error ? error.message : String(error)
+
+  if (code === 'ENOENT') {
+    return new TtsError(
+      ErrorCode.EdgeTtsNotFound,
+      `Cannot start Edge-TTS: ${detail}`,
+      'Install it with `pip install edge-tts`, or point `edgeTtsBinary` at the executable.',
+      { cause: error },
+    )
+  }
+
+  if (code === 'EPERM') {
+    return new TtsError(
+      ErrorCode.SpawnEperm,
+      `The DSH sandbox denied process creation for Edge-TTS (spawn EPERM): ${detail}`,
+      'Raise the DSH sandbox process/file policy and retry. This is a sandbox policy denial, not a missing or unwritable output directory.',
+      { cause: error },
+    )
+  }
+
+  return new TtsError(
+    ErrorCode.SpawnFailed,
+    `Failed to spawn Edge-TTS (${code ?? 'unknown error'}): ${detail}`,
+    'Check that `edgeTtsBinary` names an existing, executable Edge-TTS CLI.',
+    { cause: error },
+  )
+}
