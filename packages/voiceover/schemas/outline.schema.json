@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/leiboss/dsh-voiceover/schemas/outline.schema.json",
+  "title": "VoiceoverOutline",
+  "description": "章节大纲：由 P0b 产出，作为流水线与断点续跑的输入。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "chapters"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+    "chapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "sourceRange", "summary", "estimatedChars"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^ch-[0-9]{2,3}$" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 14 },
+          "summary": { "type": "string", "maxLength": 80 },
+          "sourceRange": {
+            "type": "array",
+            "description": "[起始段落序号, 结束段落序号]，包含两端；相邻章节必须首尾相接。",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "integer", "minimum": 0 }
+          },
+          "estimatedChars": { "type": "integer", "minimum": 1 },
+          "crossRefs": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 40 }
+          },
+          "note": { "type": "string", "maxLength": 120 }
+        }
+      }
+    }
+  }
+}

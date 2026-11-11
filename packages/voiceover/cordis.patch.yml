@@ -1,0 +1,9 @@
+# Mounts the engine and the product in one install. The engine id is prefixed
+# so it never collides with a standalone @leiboss/dsh-tts install.
+- insert:
+    - id: voiceover-tts
+      name: '@leiboss/dsh-tts'
+      config: {}
+    - id: dsh-voiceover
+      name: '@leiboss/dsh-voiceover'
+      config: {}

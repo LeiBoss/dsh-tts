@@ -1,0 +1,71 @@
+{
+  "name": "@leiboss/dsh-voiceover",
+  "version": "0.1.0",
+  "description": "Long-form voiceover pipeline for DeepSeek Harness: chapter planning, spoken-script adaptation, subtitles, manifest, and resumable jobs. Turns a document into a publishable audio set.",
+  "license": "MIT",
+  "author": "leiboss",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leiboss/dsh-tts.git",
+    "directory": "packages/voiceover"
+  },
+  "homepage": "https://github.com/leiboss/dsh-tts/tree/main/packages/voiceover#readme",
+  "bugs": {
+    "url": "https://github.com/leiboss/dsh-tts/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "audiobook",
+    "voiceover",
+    "subtitle",
+    "srt",
+    "text-to-speech",
+    "tts",
+    "long-form"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "schemas",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18",
+    "dsh": ">=0.2.2-rc.1"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.1.0 <5",
+    "@deepseek-ai/dsh-llm": ">=0.0.1-rc.1 <1",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1 <1"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1-rc.1",
+    "@leiboss/dsh-tts": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

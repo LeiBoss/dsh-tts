@@ -17,4 +17,4 @@ jobs:
       - run: npm test
       - run: npm run check:engines
       - name: Check dist is committed and current
-        run: git diff --exit-code -- dist
+        run: git diff --exit-code -- packages/tts/dist packages/voiceover/dist

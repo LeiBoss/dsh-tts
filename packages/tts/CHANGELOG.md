@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- Add `TtsService` (`@leiboss/dsh-tts/service`): one orchestrator over cache,
+  concurrency, chunking, and the fallback chain, returning structured audio
+  facts (`durationMs`, `timingQuality`, `engine`, `fromCache`).
+- Publish the engine as `ctx.tts` on mount (`inject: ['tts']` in consumers).
+  Registration is best-effort: a host without a service seam still gets the
+  tools.
+- Add pure-JS MP3 duration measurement (`src/audio/mp3-duration.ts`), so
+  duration and subtitle timing never require ffmpeg.
+- Fix a cache-key gap: `pitch` and `volume` now participate in the synthesis
+  key, so two calls that differ only in prosody no longer share a file.
+
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

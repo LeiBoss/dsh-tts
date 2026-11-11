@@ -1,8 +1,9 @@
 node_modules/
 *.tgz
 .DS_Store
-# Uploaded attachments are tool input, never repository content.
 .uploads/
+*.tsbuildinfo
 
-# dist/ is intentionally committed so `dsh plugin add github:leiboss/dsh-tts`
-# works without a build step. Run `npm run build` after editing src/.
+# dist/ is intentionally committed for both packages: GitHub installs
+# (`dsh plugin add github:leiboss/dsh-tts`) must work without a build step.
+# Run `npm run build` after editing src/ and commit the regenerated dist/.

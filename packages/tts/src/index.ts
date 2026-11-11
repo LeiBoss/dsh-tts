@@ -1,8 +1,8 @@
 /**
  * DSH tool plugin: text in, a durable audio file out.
  *
- * The plugin owns exactly one capability — Edge-TTS synthesis into
- * `$DSH_HOME/tts-output` — and exposes it through `tts_generate` plus a
+ * The plugin owns exactly one capability 鈥?Edge-TTS synthesis into
+ * `$DSH_HOME/tts-output` 鈥?and exposes it through `tts_generate` plus a
  * side-effect-free `tts_self_check`. It deliberately implements no playback,
  * transcription, voice cloning, or multi-provider routing.
  */
@@ -46,6 +46,7 @@ import type { SapiOptions } from './sapi-tts.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
 import { probeEndpoint, type ProbeConnector } from './probe.ts'
 import { AVAILABLE_VOICES } from './voices.ts'
+import { mountTtsService } from './register-service.ts'
 
 export { Config } from './config.ts'
 export type { TtsConfig } from './config.ts'
@@ -460,7 +461,7 @@ export function createTtsTools(
     })()
     const header = `Generated audio: \`${filePath}\` (${format})`
     if (absolute !== undefined) {
-      return `${header}\n[▶ 播放](${absolute})`
+      return `${header}\n[鈻?鎾斁](${absolute})`
     }
     if (value.browserUrl !== undefined) {
       return `Generated audio: ${filePath} (${format})\nPlayback URL: ${value.browserUrl}`
@@ -1004,4 +1005,8 @@ export function apply(ctx: Context, config?: Partial<TtsConfig>): void {
   for (const tool of createTtsTools(resolved, { audioRoute, log: debug })) {
     ctx.tools.register(tool)
   }
+
+  // Publish the engine for other plugins (inject: ['tts']). Best effort:
+  // a host without a service seam still gets the tools.
+  mountTtsService(ctx, resolved)
 }

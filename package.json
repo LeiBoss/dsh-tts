@@ -1,90 +1,23 @@
 {
-  "name": "@leiboss/dsh-tts",
-  "version": "0.2.1",
-  "description": "Reliable TTS infrastructure for DSH plugin authors: concurrency-safe synthesis, layered error semantics, chunked long-text, and provider fallback. Returns playable audio with browser-accessible URLs.",
-  "license": "MIT",
-  "author": "leiboss",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/leiboss/dsh-tts.git"
-  },
-  "homepage": "https://github.com/leiboss/dsh-tts#readme",
-  "bugs": {
-    "url": "https://github.com/leiboss/dsh-tts/issues"
-  },
-  "keywords": [
-    "dsh-plugin",
-    "dsh",
-    "tts",
-    "edge-tts",
-    "text-to-speech",
-    "voice",
-    "tts-backend",
-    "tts-provider",
-    "voice-infrastructure",
-    "plugin-infrastructure"
-  ],
+  "name": "dsh-tts-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "DSH audio packages: a reliable TTS engine (@leiboss/dsh-tts) and a long-form voiceover pipeline (@leiboss/dsh-voiceover).",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": "./dist/index.js",
-    "./provider": "./dist/provider.js",
-    "./client": "./dist/client.js",
-    "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg",
-    "./package.json": "./package.json"
-  },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-tool",
-        "@deepseek-ai/dsh-client-ui-slots"
-      ],
-      "immediately": true
-    }
-  },
-  "files": [
-    "dist",
-    "cordis.patch.yml",
-    "locale/*.json",
-    "icon.svg",
-    "README.md",
-    "CHANGELOG.md"
+  "workspaces": [
+    "packages/*"
   ],
   "engines": {
-    "node": ">=22.18",
-    "dsh": ">=0.2.2-rc.1"
+    "node": ">=22.18"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
-    "test": "node --test test/*.test.ts",
-    "test:integration": "node test/integration.ts",
-    "check:engines": "node scripts/check-engines.mjs",
-    "prepublishOnly": "npm run build && npm test"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.1.0 <5",
-    "@deepseek-ai/dsh-llm": ">=0.0.1-rc.1 <1",
-    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1 <1"
-  },
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1-rc.1"
+    "build": "npm run build -w @leiboss/dsh-tts && npm run build -w @leiboss/dsh-voiceover",
+    "test": "npm run test -w @leiboss/dsh-tts && npm run test -w @leiboss/dsh-voiceover",
+    "check:engines": "npm run check:engines -w @leiboss/dsh-tts",
+    "test:integration": "npm run test:integration -w @leiboss/dsh-tts"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-llm": "0.0.1-rc.5",
-    "@deepseek-ai/dsh-tools": "0.0.1-rc.1",
     "@types/node": "^24.0.0",
-    "semver": "^7.6.0",
     "typescript": "^5.9.0"
   }
 }
