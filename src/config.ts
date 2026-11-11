@@ -33,6 +33,15 @@ export const DEFAULT_FALLBACK_ORDER = [
 /** Fallback is enabled unless configured otherwise. */
 export const DEFAULT_FALLBACK_ENABLED = true
 
+/** Syntheses allowed to run at the same time. */
+export const DEFAULT_MAX_CONCURRENT = 2
+
+/** Callers allowed to wait for a synthesis slot. */
+export const DEFAULT_QUEUE_SIZE = 4
+
+/** How long a caller may wait for a slot before TTS_BUSY. */
+export const DEFAULT_QUEUE_TIMEOUT_MS = 10_000
+
 /** One engine in the fallback chain. */
 export type TtsEngine = (typeof DEFAULT_FALLBACK_ORDER)[number]
 
@@ -54,6 +63,9 @@ export const Config = z.object({
   chunkingEnabled: z.boolean().default(DEFAULT_CHUNKING_ENABLED),
   fallbackEnabled: z.boolean().default(DEFAULT_FALLBACK_ENABLED),
   fallbackOrder: z.array(z.string()).default([...DEFAULT_FALLBACK_ORDER]),
+  maxConcurrent: z.number().default(DEFAULT_MAX_CONCURRENT),
+  queueSize: z.number().default(DEFAULT_QUEUE_SIZE),
+  queueTimeoutMs: z.number().default(DEFAULT_QUEUE_TIMEOUT_MS),
 })
 
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
@@ -66,6 +78,9 @@ export interface TtsConfig {
   chunkingEnabled?: boolean
   fallbackEnabled?: boolean
   fallbackOrder?: string[]
+  maxConcurrent?: number
+  queueSize?: number
+  queueTimeoutMs?: number
 }
 
 /** Effective, path-resolved plugin settings. */
@@ -82,6 +97,9 @@ export interface ResolvedConfig {
   fallbackEnabled: boolean
   /** Unknown engine names are dropped; order is preserved. */
   fallbackOrder: TtsEngine[]
+  maxConcurrent: number
+  queueSize: number
+  queueTimeoutMs: number
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -119,6 +137,9 @@ export function resolveConfig(
       raw?.fallbackOrder === undefined
         ? [...DEFAULT_FALLBACK_ORDER]
         : raw.fallbackOrder.filter(isTtsEngine),
+    maxConcurrent: raw?.maxConcurrent ?? DEFAULT_MAX_CONCURRENT,
+    queueSize: raw?.queueSize ?? DEFAULT_QUEUE_SIZE,
+    queueTimeoutMs: raw?.queueTimeoutMs ?? DEFAULT_QUEUE_TIMEOUT_MS,
   }
 }
 
@@ -133,6 +154,9 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
   chunkingEnabled: boolean
   fallbackEnabled: boolean
   fallbackOrder: TtsEngine[]
+  maxConcurrent: number
+  queueSize: number
+  queueTimeoutMs: number
 } {
   if (!config.outputDir) {
     throw new TtsError(
@@ -158,6 +182,30 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
       'Set `chunkSize` to a positive character count (default 1200), or disable chunking.',
     )
   }
+  if (
+    !Number.isInteger(config.maxConcurrent) ||
+    config.maxConcurrent < 1
+  ) {
+    throw new TtsError(
+      ErrorCode.InvalidConfig,
+      `Invalid config: maxConcurrent must be a positive integer, got ${JSON.stringify(config.maxConcurrent)}.`,
+      'Set `maxConcurrent` to at least 1 (default 2).',
+    )
+  }
+  if (!Number.isInteger(config.queueSize) || config.queueSize < 0) {
+    throw new TtsError(
+      ErrorCode.InvalidConfig,
+      `Invalid config: queueSize must be a non-negative integer, got ${JSON.stringify(config.queueSize)}.`,
+      'Set `queueSize` to 0 or more (default 4).',
+    )
+  }
+  if (!Number.isFinite(config.queueTimeoutMs) || config.queueTimeoutMs <= 0) {
+    throw new TtsError(
+      ErrorCode.InvalidConfig,
+      `Invalid config: queueTimeoutMs must be a positive number, got ${JSON.stringify(config.queueTimeoutMs)}.`,
+      'Set `queueTimeoutMs` to a positive millisecond value (default 10000).',
+    )
+  }
   return {
     outputDir: config.outputDir,
     timeoutMs: config.timeoutMs,
@@ -165,5 +213,8 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
     chunkingEnabled: config.chunkingEnabled,
     fallbackEnabled: config.fallbackEnabled,
     fallbackOrder: config.fallbackOrder,
+    maxConcurrent: config.maxConcurrent,
+    queueSize: config.queueSize,
+    queueTimeoutMs: config.queueTimeoutMs,
   }
 }

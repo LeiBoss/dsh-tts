@@ -51,6 +51,21 @@ function sendText(res, status, message, headers = {}) {
     }
     res.end(body);
 }
+function headerValue(value) {
+    return Array.isArray(value) ? value[0] : value;
+}
+/**
+ * Hostnames trusted by default for a bind address. Wildcard binds accept any
+ * hostname (the port and same-origin checks still apply), because the public
+ * hostname is not knowable from `0.0.0.0`.
+ */
+function defaultAllowedHosts(host) {
+    const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
+    if (normalized === '0.0.0.0' || normalized === '::' || normalized === '*') {
+        return [];
+    }
+    return [...new Set(['localhost', '127.0.0.1', '::1', normalized])];
+}
 /**
  * Owns the signed-token format and the HTTP handler. One instance per plugin
  * load; `register` binds it to the host router and returns a disposer.
@@ -60,12 +75,18 @@ export class AudioRoute {
     ttlMs;
     secret;
     now;
+    debug;
+    allowedHosts;
+    expectedPort;
     active = false;
     constructor(options) {
         this.root = resolve(options.outputDir);
         this.ttlMs = options.ttlMs ?? DEFAULT_URL_TTL_MS;
         this.secret = options.secret ?? randomBytes(32);
         this.now = options.now ?? Date.now;
+        this.allowedHosts = options.allowedHosts;
+        this.expectedPort = options.expectedPort;
+        this.debug = options.debug;
     }
     /** True once the host router accepted the route. */
     get registered() {
@@ -73,6 +94,11 @@ export class AudioRoute {
     }
     /** Register on the DSH host router; the disposer unregisters and disables URLs. */
     register(server) {
+        if (this.expectedPort === undefined)
+            this.expectedPort = server.port;
+        if (this.allowedHosts === undefined && server.host) {
+            this.allowedHosts = defaultAllowedHosts(server.host);
+        }
         const dispose = server.register({
             kind: 'prefix',
             path: AUDIO_ROUTE_PREFIX,
@@ -108,6 +134,12 @@ export class AudioRoute {
         const method = req.method ?? 'GET';
         if (method !== 'GET' && method !== 'HEAD') {
             sendText(res, 405, 'Method Not Allowed', { Allow: 'GET, HEAD' });
+            return;
+        }
+        const rejection = this.checkOrigin(req);
+        if (rejection !== undefined) {
+            this.debug?.(`audio route rejected: ${rejection}`);
+            sendText(res, 403, 'Forbidden');
             return;
         }
         const rawUrl = req.url ?? '';
@@ -180,6 +212,59 @@ export class AudioRoute {
     /** HMAC-SHA-256 over the payload, base64url-encoded. */
     sign(payload) {
         return createHmac('sha256', this.secret).update(payload, 'utf8').digest('base64url');
+    }
+    /**
+     * Same-origin fence in front of the token check. Returns a reason when the
+     * request must be rejected. Missing headers are tolerated only when neither
+     * a port nor an Origin pins the request to a browser origin, which keeps
+     * non-browser callers working while DSH provides no trust-fence API.
+     */
+    checkOrigin(req) {
+        const host = headerValue(req.headers.host);
+        const origin = headerValue(req.headers.origin);
+        if (host === undefined) {
+            return origin === undefined ? undefined : 'origin present without host';
+        }
+        let parsed;
+        try {
+            parsed = new URL(`http://${host}`);
+        }
+        catch {
+            return 'malformed host header';
+        }
+        const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        if (this.allowedHosts !== undefined &&
+            this.allowedHosts.length > 0 &&
+            !this.allowedHosts.includes(hostname)) {
+            return `untrusted host ${hostname}`;
+        }
+        if (this.expectedPort !== undefined) {
+            const port = parsed.port === ''
+                ? parsed.protocol === 'https:'
+                    ? 443
+                    : 80
+                : Number(parsed.port);
+            if (port !== this.expectedPort) {
+                return `host port ${port} does not match ${this.expectedPort}`;
+            }
+        }
+        if (origin !== undefined) {
+            let parsedOrigin;
+            try {
+                parsedOrigin = new URL(origin);
+            }
+            catch {
+                return 'malformed origin header';
+            }
+            if (parsedOrigin.protocol !== 'http:' &&
+                parsedOrigin.protocol !== 'https:') {
+                return `unsupported origin scheme ${parsedOrigin.protocol}`;
+            }
+            if (parsedOrigin.host.toLowerCase() !== host.toLowerCase()) {
+                return 'origin and host differ';
+            }
+        }
+        return undefined;
     }
     /** Path relative to the ledger root, using `/` on every platform. */
     relativePath(filePath) {

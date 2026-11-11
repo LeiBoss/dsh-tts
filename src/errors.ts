@@ -18,6 +18,7 @@ export const ErrorCode = {
   SynthesisTimeout: 'SYNTHESIS_TIMEOUT',
   EmptyAudio: 'EMPTY_AUDIO',
   Aborted: 'ABORTED',
+  TtsBusy: 'TTS_BUSY',
   AllFallbacksFailed: 'ALL_FALLBACKS_FAILED',
   SpeechSynthesisRequired: 'SPEECH_SYNTHESIS_REQUIRED',
 } as const

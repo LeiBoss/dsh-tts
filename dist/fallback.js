@@ -22,7 +22,7 @@ function allFailed(order, attempts, primaryError) {
     const reasons = attempts
         .map((attempt) => `${attempt.engine} (${attempt.reason})`)
         .join('; ');
-    return new TtsError(ErrorCode.AllFallbacksFailed, `All configured TTS fallbacks failed. Chain: ${order.join(' -> ')}. Tried: ${reasons}.`, 'Install edge-tts and restore network access, or include `speechSynthesis` in `fallbackOrder`.', { cause: primaryError });
+    return new TtsError(ErrorCode.AllFallbacksFailed, `All configured TTS fallbacks failed. Chain: ${order.join(' -> ')}. Tried: ${reasons}. Engines: ${JSON.stringify(order)}.`, 'Install edge-tts and restore network access, or include `speechSynthesis` in `fallbackOrder`.', { cause: primaryError });
 }
 /**
  * Run the configured engines after Edge-TTS already failed. `edge-tts` in

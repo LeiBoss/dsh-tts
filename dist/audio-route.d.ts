@@ -12,6 +12,10 @@ export interface RegisterableRoute {
 /** Structural view of `ctx.httpServer`; only `register` is used. */
 export interface HttpRouteRegistrar {
     register(route: RegisterableRoute): () => void;
+    /** Advertised bind host, when the host exposes it. */
+    host?: string;
+    /** Actual listening port, when the host exposes it. */
+    port?: number;
 }
 /** Resolves a local audio path to a browser-openable URL, when routable. */
 export interface AudioUrlProvider {
@@ -26,6 +30,12 @@ export interface AudioRouteOptions {
     secret?: Buffer;
     /** Injectable clock in epoch milliseconds. */
     now?: () => number;
+    /** Hostnames allowed in `Host`; unset means any hostname (port still checked). */
+    allowedHosts?: readonly string[];
+    /** Expected listen port; mismatched `Host` ports are rejected. */
+    expectedPort?: number;
+    /** Debug sink for origin rejections; receives no token or path. */
+    debug?: (message: string) => void;
 }
 /**
  * Owns the signed-token format and the HTTP handler. One instance per plugin
@@ -36,6 +46,9 @@ export declare class AudioRoute implements AudioUrlProvider {
     private readonly ttlMs;
     private readonly secret;
     private readonly now;
+    private readonly debug?;
+    private allowedHosts?;
+    private expectedPort?;
     private active;
     constructor(options: AudioRouteOptions);
     /** True once the host router accepted the route. */
@@ -51,6 +64,13 @@ export declare class AudioRoute implements AudioUrlProvider {
     handle(req: IncomingMessage, res: ServerResponse): Promise<void>;
     /** HMAC-SHA-256 over the payload, base64url-encoded. */
     private sign;
+    /**
+     * Same-origin fence in front of the token check. Returns a reason when the
+     * request must be rejected. Missing headers are tolerated only when neither
+     * a port nor an Origin pins the request to a browser origin, which keeps
+     * non-browser callers working while DSH provides no trust-fence API.
+     */
+    private checkOrigin;
     /** Path relative to the ledger root, using `/` on every platform. */
     private relativePath;
     /** Verify signature + expiry, then confine the decoded path to the root. */

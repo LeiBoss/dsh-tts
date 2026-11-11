@@ -17,6 +17,12 @@ export declare const DEFAULT_CHUNKING_ENABLED = true;
 export declare const DEFAULT_FALLBACK_ORDER: readonly ["edge-tts", "sapi", "speechSynthesis"];
 /** Fallback is enabled unless configured otherwise. */
 export declare const DEFAULT_FALLBACK_ENABLED = true;
+/** Syntheses allowed to run at the same time. */
+export declare const DEFAULT_MAX_CONCURRENT = 2;
+/** Callers allowed to wait for a synthesis slot. */
+export declare const DEFAULT_QUEUE_SIZE = 4;
+/** How long a caller may wait for a slot before TTS_BUSY. */
+export declare const DEFAULT_QUEUE_TIMEOUT_MS = 10000;
 /** One engine in the fallback chain. */
 export type TtsEngine = (typeof DEFAULT_FALLBACK_ORDER)[number];
 /** Narrow an arbitrary config string to a known engine. */
@@ -34,6 +40,9 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     chunkingEnabled: z<boolean, boolean, "defined">;
     fallbackEnabled: z<boolean, boolean, "defined">;
     fallbackOrder: z<string[], string[], "defined">;
+    maxConcurrent: z<number, number, "defined">;
+    queueSize: z<number, number, "defined">;
+    queueTimeoutMs: z<number, number, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     outputDir: z<string, string, "plain">;
     defaultVoice: z<string, string, "defined">;
@@ -43,6 +52,9 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     chunkingEnabled: z<boolean, boolean, "defined">;
     fallbackEnabled: z<boolean, boolean, "defined">;
     fallbackOrder: z<string[], string[], "defined">;
+    maxConcurrent: z<number, number, "defined">;
+    queueSize: z<number, number, "defined">;
+    queueTimeoutMs: z<number, number, "defined">;
 }>>, "plain">;
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
 export interface TtsConfig {
@@ -54,6 +66,9 @@ export interface TtsConfig {
     chunkingEnabled?: boolean;
     fallbackEnabled?: boolean;
     fallbackOrder?: string[];
+    maxConcurrent?: number;
+    queueSize?: number;
+    queueTimeoutMs?: number;
 }
 /** Effective, path-resolved plugin settings. */
 export interface ResolvedConfig {
@@ -69,6 +84,9 @@ export interface ResolvedConfig {
     fallbackEnabled: boolean;
     /** Unknown engine names are dropped; order is preserved. */
     fallbackOrder: TtsEngine[];
+    maxConcurrent: number;
+    queueSize: number;
+    queueTimeoutMs: number;
 }
 /**
  * Resolve config defaults without touching the filesystem. A missing
@@ -87,5 +105,8 @@ export declare function requireSynthesisConfig(config: ResolvedConfig): {
     chunkingEnabled: boolean;
     fallbackEnabled: boolean;
     fallbackOrder: TtsEngine[];
+    maxConcurrent: number;
+    queueSize: number;
+    queueTimeoutMs: number;
 };
 //# sourceMappingURL=config.d.ts.map
