@@ -25,6 +25,10 @@ export const DEFAULT_INTER_CHUNK_DELAY_MS = 200
 export interface ChunkedSynthesisOptions {
   voice: string
   rate: string
+  /** Applied uniformly to every chunk. */
+  pitch?: string
+  /** Applied uniformly to every chunk. */
+  volume?: string
   binary: string
   outputDir: string
   /** Cache key of the full original text. */
@@ -84,6 +88,8 @@ export async function synthesizeChunked(
   const base = {
     voice: options.voice,
     rate: options.rate,
+    pitch: options.pitch,
+    volume: options.volume,
     binary: options.binary,
     timeoutMs: options.timeoutMs,
     signal: options.signal,

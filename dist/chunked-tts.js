@@ -40,6 +40,8 @@ export async function synthesizeChunked(text, options) {
     const base = {
         voice: options.voice,
         rate: options.rate,
+        pitch: options.pitch,
+        volume: options.volume,
         binary: options.binary,
         timeoutMs: options.timeoutMs,
         signal: options.signal,

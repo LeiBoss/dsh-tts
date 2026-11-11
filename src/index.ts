@@ -32,6 +32,7 @@ import { ErrorCode, TtsError } from './errors.ts'
 import { isFallbackEligible, runFallback } from './fallback.ts'
 import type { SapiOptions } from './sapi-tts.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
+import { AVAILABLE_VOICES } from './voices.ts'
 
 export { Config } from './config.ts'
 export type { TtsConfig } from './config.ts'
@@ -44,6 +45,7 @@ export { DEFAULT_CHUNK_SIZE, splitText } from './chunker.ts'
 export { synthesizeChunked } from './chunked-tts.ts'
 export { isFallbackEligible, runFallback } from './fallback.ts'
 export { isSapiSupported, sapiRate, synthesizeSapi } from './sapi-tts.ts'
+export { AVAILABLE_VOICES, VOICES, type VoiceInfo } from './voices.ts'
 
 export const name = 'dsh-tts'
 
@@ -58,6 +60,12 @@ const VOICE_PATTERN = /^[a-z]{2,3}-[A-Z]{2,3}(?:-[a-z0-9]+)?-[A-Za-z0-9]+Neural$
 
 /** Edge-TTS rates are signed percentages such as `+0%` or `-10%`. */
 const RATE_PATTERN = /^[+-]\d{1,3}%$/
+
+/** Pitch Edge-TTS uses when the call omits one. */
+export const DEFAULT_PITCH = '+0Hz'
+
+/** Volume Edge-TTS uses when the call omits one. */
+export const DEFAULT_VOLUME = '+0%'
 
 /** Injection points used by tests; production always uses the defaults. */
 export interface TtsDependencies {
@@ -169,6 +177,14 @@ export function createTtsTools(
         type: 'string',
         description: `Speech rate as a signed percentage, for example +0% or -10%. Defaults to ${DEFAULT_RATE}.`,
       },
+      pitch: {
+        type: 'string',
+        description: `Pitch adjustment as a signed frequency, for example +10Hz or -20Hz. Defaults to ${DEFAULT_PITCH}.`,
+      },
+      volume: {
+        type: 'string',
+        description: `Volume adjustment as a signed percentage, for example +20% or -10%. Defaults to ${DEFAULT_VOLUME}.`,
+      },
     },
     output: {
       schema: {
@@ -228,6 +244,9 @@ export function createTtsTools(
       const rate = args.rate?.trim() || DEFAULT_RATE
       requireRate(rate)
 
+      const pitch = args.pitch?.trim() || DEFAULT_PITCH
+      const volume = args.volume?.trim() || DEFAULT_VOLUME
+
       const {
         outputDir,
         timeoutMs,
@@ -251,6 +270,8 @@ export function createTtsTools(
           ? await synthesizeChunked(text, {
               voice,
               rate,
+              pitch,
+              volume,
               binary: config.edgeTtsBinary,
               outputDir,
               hash,
@@ -264,6 +285,8 @@ export function createTtsTools(
           : await synthesize(text, {
               voice,
               rate,
+              pitch,
+              volume,
               binary: config.edgeTtsBinary,
               outputDir,
               hash,
@@ -348,6 +371,13 @@ export function createTtsTools(
             required: true,
             description: 'Value of DSH_HOME, or an empty string when unset.',
           },
+          availableVoices: {
+            type: 'array',
+            items: { type: 'string' },
+            required: true,
+            description:
+              'Static list of documented voice names; no network query is performed.',
+          },
         },
         additionalProperties: false,
       },
@@ -355,12 +385,13 @@ export function createTtsTools(
         { type: 'text' as const, text: JSON.stringify(value, null, 2) },
       ],
     },
-    async execute(_args, exec): Promise<SelfCheckResult> {
-      return selfCheck({
+    async execute(_args, exec): Promise<SelfCheckResult & { availableVoices: string[] }> {
+      const result = await selfCheck({
         config,
         signal: exec.signal,
         spawnImpl: deps.spawnImpl,
       })
+      return { ...result, availableVoices: [...AVAILABLE_VOICES] }
     },
   })
 

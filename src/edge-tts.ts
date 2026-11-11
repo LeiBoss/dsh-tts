@@ -161,6 +161,10 @@ export function runProcess(
 export interface SynthesizeOptions {
   voice: string
   rate: string
+  /** Pitch adjustment such as `+10Hz`; omitted for Edge-TTS's own default. */
+  pitch?: string
+  /** Volume adjustment such as `-10%`; omitted for Edge-TTS's own default. */
+  volume?: string
   binary: string
   outputDir: string
   /** Stable cache key; also names the output file. */
@@ -215,6 +219,8 @@ export async function synthesize(
     `--text=${text}`,
     `--voice=${options.voice}`,
     `--rate=${options.rate}`,
+    ...(options.pitch === undefined ? [] : [`--pitch=${options.pitch}`]),
+    ...(options.volume === undefined ? [] : [`--volume=${options.volume}`]),
     `--write-media=${partialPath}`,
   ]
 

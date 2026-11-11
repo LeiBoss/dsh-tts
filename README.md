@@ -74,6 +74,25 @@ dsh plugin add dsh-tts
 
 未设置 `DSH_HOME` 且未配置 `outputDir` 时，`tts_generate` 会返回 `DSH_HOME_NOT_SET`。
 
+## 可用音色
+
+音色清单是 `src/voices.ts` 中的静态常量，`tts_self_check` 会通过 `availableVoices` 返回全部音色名，不会在自检时联网查询。该清单用于文档与设置面板展示，不是白名单：`tts_generate` 仍接受 Edge-TTS 支持的其他音色名。
+
+| 音色名 | 性别 | 语言/方言 | 适用场景 |
+| --- | --- | --- | --- |
+| `zh-CN-XiaoxiaoNeural` | 女 | 中文（普通话） | 默认女声，自然通用 |
+| `zh-CN-YunxiNeural` | 男 | 中文（普通话） | 年轻自然男声 |
+| `zh-CN-XiaoyiNeural` | 女 | 中文（普通话） | 活泼女声 |
+| `zh-CN-YunyangNeural` | 男 | 中文（普通话） | 播音腔 |
+| `zh-CN-YunjianNeural` | 男 | 中文（普通话） | 沉稳男声 |
+| `zh-CN-liaoning-XiaobeiNeural` | 女 | 中文（东北话） | 方言 |
+| `zh-CN-shaanxi-XiaoniNeural` | 女 | 中文（陕西话） | 方言 |
+| `en-US-AriaNeural` | 女 | 英文（美式） | 默认英文女声 |
+| `en-US-GuyNeural` | 男 | 英文（美式） | 英文男声 |
+| `en-US-JennyNeural` | 女 | 英文（美式） | 对话感英文女声 |
+
+`tts_generate` 另支持可选的 `pitch`（默认 `+0Hz`）与 `volume`（默认 `+0%`），分别透传为 Edge-TTS 的 `--pitch` 与 `--volume`。
+
 ## 错误码
 
 | 错误码 | 触发条件 | 处理建议 |
@@ -96,6 +115,7 @@ dsh plugin add dsh-tts
 - 降级仅在 Edge-TTS 引擎失败（子进程非零退出、超时、空音频、无法启动）时触发；参数校验失败与缓存命中不会降级。
 - SAPI 降级仅限 Windows，通过 `powershell.exe` 合成 WAV，再要求 `ffmpeg` 转换为 MP3；缺少 `ffmpeg` 时继续降级到 `speechSynthesis`。SAPI 使用系统默认语音，不映射 Edge 的 `voice` 参数。
 - 宿主端无法产出文件且链中包含 `speechSynthesis` 时，返回 `filePath` 为空字符串的标记值，需要调用方配合朗读。
+- **pitch 和 volume 不参与缓存键。** 相同文本、音色、语速的第二次调用会返回首次生成的文件，即使本次指定了不同的 pitch/volume。如需强制重新生成，请更换 voice 或 rate，或手动清除对应缓存文件。
 - 当前不解析音频容器时长，返回值的可选字段 `durationMs` 会省略。
 
 ## 开发与测试

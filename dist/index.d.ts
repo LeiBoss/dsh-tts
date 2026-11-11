@@ -23,9 +23,14 @@ export { DEFAULT_CHUNK_SIZE, splitText } from './chunker.ts';
 export { synthesizeChunked } from './chunked-tts.ts';
 export { isFallbackEligible, runFallback } from './fallback.ts';
 export { isSapiSupported, sapiRate, synthesizeSapi } from './sapi-tts.ts';
+export { AVAILABLE_VOICES, VOICES, type VoiceInfo } from './voices.ts';
 export declare const name = "dsh-tts";
 /** The registry must exist before `apply` runs. */
 export declare const inject: string[];
+/** Pitch Edge-TTS uses when the call omits one. */
+export declare const DEFAULT_PITCH = "+0Hz";
+/** Volume Edge-TTS uses when the call omits one. */
+export declare const DEFAULT_VOLUME = "+0%";
 /** Injection points used by tests; production always uses the defaults. */
 export interface TtsDependencies {
     spawnImpl?: SpawnFunction;
