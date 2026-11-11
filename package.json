@@ -1,6 +1,6 @@
 {
   "name": "@leiboss/dsh-tts",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reliable TTS infrastructure for DSH plugin authors: concurrency-safe synthesis, layered error semantics, chunked long-text, and provider fallback. Returns playable audio with browser-accessible URLs.",
   "license": "MIT",
   "author": "leiboss",
