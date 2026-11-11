@@ -8,6 +8,11 @@ import {
 import { ErrorCode, TtsError } from './errors.ts'
 
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
+export const DEFAULT_ENGINE = 'auto'
+
+/** Synthesis backends this package understands. */
+export type TtsEngineKind = 'auto' | 'edge-js' | 'edge-py' | 'sapi'
+
 export const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural'
 
 /** Rate Edge-TTS uses when the call omits one. */
@@ -80,6 +85,9 @@ export const Config = z.object({
   totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
   trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
   proxy: z.string(),
+  engine: z
+    .union([z.const('auto'), z.const('edge-js'), z.const('edge-py'), z.const('sapi')])
+    .default(DEFAULT_ENGINE),
   engineHealth: z
     .object({
       enabled: z.boolean().default(DEFAULT_ENGINE_HEALTH.enabled),
@@ -112,6 +120,8 @@ export interface TtsConfig {
   trustedHosts?: string[]
   /** HTTP proxy forwarded to edge-tts as `--proxy`; no env fallback. */
   proxy?: string
+  /** Requested backend; `auto` prefers the pure-JS engine. */
+  engine?: TtsEngineKind
   /** Engine health state machine tunables; omitted fields use defaults. */
   engineHealth?: Partial<EngineHealthConfig>
 }
@@ -137,6 +147,8 @@ export interface ResolvedConfig {
   trustedHosts: string[]
   /** Undefined when unset; deliberately never read from the environment. */
   proxy?: string
+  /** Resolved backend; `auto` is resolved at synthesis time. */
+  engine: TtsEngineKind
   /** Fully resolved engine health settings. */
   engineHealth: EngineHealthConfig
 }
@@ -199,6 +211,7 @@ export function resolveConfig(
       .map((host) => host.trim().toLowerCase())
       .filter((host) => host.length > 0),
     proxy: nonEmpty(raw?.proxy),
+    engine: raw?.engine ?? DEFAULT_ENGINE,
     engineHealth: resolveEngineHealth(raw?.engineHealth),
   }
 }

@@ -2,18 +2,21 @@
  * The injectable `ctx.tts` service.
  *
  * The tool layer (`tts_generate`) and other plugins share one implementation:
- * cache lookup, single-flight-free concurrency, chunked long text, fallback,
- * and duration measurement. The service deliberately returns structured audio
- * facts (duration, timing quality, engine) rather than a rendered string, so a
- * consumer plugin can build its own UX.
+ * cache lookup, bounded concurrency, chunked long text, fallback, and duration
+ * measurement. The service deliberately returns structured audio facts
+ * (duration, timing quality, engine, word boundaries) rather than a rendered
+ * string, so a consumer plugin can build its own UX.
  */
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { measureMp3 } from './audio/mp3-duration.ts'
-import { AUDIO_FORMAT, cacheKey, findCachedFile, readCacheMetadata, writeCacheMetadata } from './cache.ts'
+import { AUDIO_FORMAT, cacheKey, findCachedFile, outputFilePath, readCacheMetadata, writeCacheMetadata } from './cache.ts'
+import { splitText } from './chunker.ts'
 import { synthesizeChunked } from './chunked-tts.ts'
 import { ConcurrencyLimiter } from './concurrency.ts'
 import type { ResolvedConfig, TtsEngine } from './config.ts'
 import { synthesize, type SpawnFunction, type SynthesizedAudio } from './edge-tts.ts'
+import { isEdgeJsAvailable, synthesizeWithEdgeJs, type EdgeJsWord } from './engines/edge-js.ts'
 import { ErrorCode, TtsError } from './errors.ts'
 import { isFallbackEligible, runFallback, type FallbackAttempt } from './fallback.ts'
 import { probeEndpoint, type ProbeConnector } from './probe.ts'
@@ -22,7 +25,7 @@ import { isSapiSupported } from './sapi-tts.ts'
 
 /** What a caller can rely on without probing the network. */
 export interface TtsCapabilities {
-  /** Word-level timings are not produced by the Edge-TTS CLIs. */
+  /** Word-level timings, which only the pure-JS backend produces. */
   readonly wordBoundaries: boolean
   readonly formats: readonly ('mp3' | 'wav')[]
   /** A fully local engine exists (SAPI on Windows). */
@@ -48,6 +51,8 @@ export interface TtsAudioResult {
   timingQuality: 'exact' | 'estimated'
   engine: string
   fromCache: boolean
+  /** Present when the backend reported word boundaries. */
+  words?: { text: string; offsetMs: number; durationMs: number }[]
   attempts?: FallbackAttempt[]
 }
 
@@ -89,6 +94,17 @@ export interface TtsServiceDeps {
   log?: (message: string) => void
 }
 
+/** Normalized arguments shared by every backend path. */
+interface SynthesisInput {
+  text: string
+  voice: string
+  rate: string
+  pitch: string
+  volume: string
+  hash: string
+  signal?: AbortSignal
+}
+
 /** Voice names are `<lang>-<REGION>-<Name>Neural` with an optional sub-region. */
 const VOICE_PATTERN = /^[a-z]{2,3}-[A-Z]{2,3}(?:-[a-z0-9]+)?-[A-Za-z0-9]+Neural$/
 const RATE_PATTERN = /^[+-]\d{1,3}%$/
@@ -112,7 +128,7 @@ function estimateDurationMs(text: string, rate: string): number {
   return Math.max(200, Math.round(seconds * 1000))
 }
 
-/** Read a finished MP3 and report its real duration when the frames parse. */
+/** Read a finished audio file and report its real duration when frames parse. */
 interface AudioFacts {
   bytes: number
   durationMs: number
@@ -126,6 +142,13 @@ async function readAudioFacts(filePath: string, text: string, rate: string): Pro
     return { bytes: buffer.length, durationMs: info.durationMs, timingQuality: 'exact' }
   }
   return { bytes: buffer.length, durationMs: estimateDurationMs(text, rate), timingQuality: 'estimated' }
+}
+
+/** Absolute end of the last reported word, used to advance a chunk offset. */
+function wordsEndMs(words: readonly EdgeJsWord[]): number {
+  let end = 0
+  for (const word of words) end = Math.max(end, word.offsetMs + word.durationMs)
+  return end
 }
 
 /**
@@ -143,6 +166,7 @@ export class TtsService {
   private readonly deps: TtsServiceDeps
   private readonly limiter: ConcurrencyLimiter
   private readonly log: (message: string) => void
+  private engineKind?: 'edge-js' | 'edge-py' | 'sapi'
 
   constructor(config: ResolvedConfig, deps: TtsServiceDeps = {}) {
     this.config = config
@@ -160,7 +184,7 @@ export class TtsService {
   /** Static capabilities; never touches the network. */
   get capabilities(): TtsCapabilities {
     return {
-      wordBoundaries: false,
+      wordBoundaries: this.engineKind !== 'edge-py',
       formats: ['mp3'],
       offline: isSapiSupported(),
     }
@@ -218,19 +242,39 @@ export class TtsService {
       }
     }
 
-    return this.limiter.run(async () => this.produce({ text, voice, rate, pitch, volume, hash, signal: request.signal }), request.signal)
+    return this.limiter.run(
+      async () =>
+        this.produce({
+          text,
+          voice,
+          rate,
+          pitch,
+          volume,
+          hash,
+          ...(request.signal === undefined ? {} : { signal: request.signal }),
+        }),
+      request.signal,
+    )
+  }
+
+  /** Resolve the backend once per instance; `auto` prefers the pure-JS engine. */
+  private async resolveEngine(): Promise<'edge-js' | 'edge-py' | 'sapi'> {
+    if (this.engineKind !== undefined) return this.engineKind
+    const configured = this.config.engine
+    this.engineKind =
+      configured === 'auto' ? ((await isEdgeJsAvailable()) ? 'edge-js' : 'edge-py') : configured
+    return this.engineKind
   }
 
   /** Produce audio without consulting the cache. */
-  private async produce(input: {
-    text: string
-    voice: string
-    rate: string
-    pitch: string
-    volume: string
-    hash: string
-    signal?: AbortSignal
-  }): Promise<TtsResult> {
+  private async produce(input: SynthesisInput): Promise<TtsResult> {
+    const engine = await this.resolveEngine()
+    if (engine === 'edge-js') return this.produceWithEdgeJs(input)
+    return this.produceWithCli(input)
+  }
+
+  /** CLI backend: one process per chunk, no word boundaries. */
+  private async produceWithCli(input: SynthesisInput): Promise<TtsResult> {
     const { text, voice, rate, pitch, volume, hash, signal } = input
     const chunked = this.config.chunkingEnabled && text.length > this.config.chunkSize
 
@@ -266,62 +310,125 @@ export class TtsService {
             spawnImpl: this.deps.spawnImpl,
             now: this.deps.now?.(),
           })
-      return this.finish(audio, text, voice, rate, pitch, volume, 'edge-tts')
+      return this.finish(audio, { text, voice, rate, pitch, volume, engine: 'edge-py' })
     } catch (error) {
-      if (!this.config.fallbackEnabled || !isFallbackEligible(error)) throw error
-      this.log(`edge-tts failed, trying the fallback chain: ${String(error)}`)
-      const outcome = await runFallback({
-        text,
-        rate,
-        outputDir: this.config.outputDir,
-        hash,
-        timeoutMs: this.config.timeoutMs,
-        fallbackOrder: this.config.fallbackOrder as readonly TtsEngine[],
-        signal,
-        primaryError: error,
-      })
-      if (outcome.kind === 'audio') {
-        return this.finish(outcome.audio, text, voice, rate, pitch, volume, outcome.engine, outcome.attempts)
-      }
-      return {
-        kind: 'speechSynthesis',
-        text,
-        voice,
-        rate,
-        reason: outcome.attempts.map((attempt) => `${attempt.engine}: ${attempt.reason}`).join('; '),
-      }
+      return this.fallbackChain(input, error)
     }
   }
 
-  /** Measure the produced file and record which engine wrote it. */
+  /** Pure-JS backend: one connection per chunk, word boundaries preserved. */
+  private async produceWithEdgeJs(input: SynthesisInput): Promise<TtsResult> {
+    const { text, voice, rate, pitch, volume, hash, signal } = input
+    const chunks =
+      this.config.chunkingEnabled && text.length > this.config.chunkSize
+        ? splitText(text, this.config.chunkSize)
+        : [text]
+
+    const buffers: Buffer[] = []
+    const words: EdgeJsWord[] = []
+    let offsetMs = 0
+
+    try {
+      for (const chunk of chunks) {
+        if (signal?.aborted) {
+          throw new TtsError(ErrorCode.Aborted, 'Synthesis was aborted between chunks.')
+        }
+        const result = await synthesizeWithEdgeJs({
+          text: chunk,
+          voice,
+          rate,
+          pitch,
+          volume,
+          ...(this.config.proxy === undefined ? {} : { proxy: this.config.proxy }),
+          timeoutMs: this.config.timeoutMs,
+        })
+        buffers.push(result.audio)
+        for (const word of result.words) {
+          words.push({ ...word, offsetMs: word.offsetMs + offsetMs })
+        }
+        const measured = measureMp3(result.audio)
+        offsetMs += measured?.durationMs ?? wordsEndMs(result.words)
+      }
+
+      const audio = Buffer.concat(buffers)
+      const filePath = outputFilePath(this.config.outputDir, hash, this.deps.now?.())
+      await mkdir(dirname(filePath), { recursive: true })
+      await writeFile(filePath, audio)
+
+      return this.finish(
+        { filePath, format: AUDIO_FORMAT },
+        { text, voice, rate, pitch, volume, engine: 'edge-js' },
+        {
+          ...(words.length === 0 ? {} : { words }),
+          ...(offsetMs > 0 ? { durationMs: offsetMs, timingQuality: 'exact' as const } : {}),
+        },
+      )
+    } catch (error) {
+      return this.fallbackChain(input, error)
+    }
+  }
+
+  /** Try the configured chain after the primary backend failed. */
+  private async fallbackChain(input: SynthesisInput, error: unknown): Promise<TtsResult> {
+    if (!this.config.fallbackEnabled || !isFallbackEligible(error)) throw error
+    this.log(`primary backend failed, trying the fallback chain: ${String(error)}`)
+
+    const outcome = await runFallback({
+      text: input.text,
+      rate: input.rate,
+      outputDir: this.config.outputDir,
+      hash: input.hash,
+      timeoutMs: this.config.timeoutMs,
+      fallbackOrder: this.config.fallbackOrder as readonly TtsEngine[],
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      primaryError: error,
+    })
+
+    if (outcome.kind === 'audio') {
+      return this.finish(outcome.audio, { ...input, engine: outcome.engine }, { attempts: outcome.attempts })
+    }
+    return {
+      kind: 'speechSynthesis',
+      text: input.text,
+      voice: input.voice,
+      rate: input.rate,
+      reason: outcome.attempts.map((attempt) => `${attempt.engine}: ${attempt.reason}`).join('; '),
+    }
+  }
+
+  /**
+   * Measure the produced file and record which engine wrote it. `override`
+   * carries facts the backend already knows (word boundaries, exact duration).
+   */
   private async finish(
     audio: SynthesizedAudio,
-    text: string,
-    voice: string,
-    rate: string,
-    pitch: string,
-    volume: string,
-    engine: string,
-    attempts?: FallbackAttempt[],
+    identity: { text: string; voice: string; rate: string; pitch: string; volume: string; engine: string },
+    override: {
+      words?: EdgeJsWord[]
+      durationMs?: number
+      timingQuality?: 'exact' | 'estimated'
+      attempts?: FallbackAttempt[]
+    } = {},
   ): Promise<TtsAudioResult> {
-    const facts = await readAudioFacts(audio.filePath, text, rate)
+    const facts = await readAudioFacts(audio.filePath, identity.text, identity.rate)
     await writeCacheMetadata(audio.filePath, {
-      engine,
-      voice,
-      rate,
-      pitch,
-      volume,
+      engine: identity.engine,
+      voice: identity.voice,
+      rate: identity.rate,
+      pitch: identity.pitch,
+      volume: identity.volume,
       createdAt: (this.deps.now?.() ?? new Date()).toISOString(),
     })
     return {
       kind: 'audio',
       filePath: audio.filePath,
       format: audio.format,
-      durationMs: facts.durationMs,
-      timingQuality: facts.timingQuality,
-      engine,
+      durationMs: override.durationMs ?? facts.durationMs,
+      timingQuality: override.timingQuality ?? facts.timingQuality,
+      engine: identity.engine,
       fromCache: false,
-      attempts,
+      ...(override.words === undefined ? {} : { words: override.words }),
+      ...(override.attempts === undefined ? {} : { attempts: override.attempts }),
     }
   }
 

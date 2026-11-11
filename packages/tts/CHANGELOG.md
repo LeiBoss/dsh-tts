@@ -2,6 +2,13 @@
 
 ## 0.3.0
 
+- Add the pure-JS backend (`src/engines/edge-js.ts`, optional `node-edge-tts`):
+  no Python, and it returns word boundaries, which upgrades subtitle timing
+  from `estimated` to `exact`. Word offsets are shifted per chunk so chunked
+  long text keeps absolute timing.
+- Add `engine: auto | edge-js | edge-py | sapi` (default `auto`, resolved once
+  per service instance) and surface `words` on `TtsAudioResult`.
+
 - Add `TtsService` (`@leiboss/dsh-tts/service`): one orchestrator over cache,
   concurrency, chunking, and the fallback chain, returning structured audio
   facts (`durationMs`, `timingQuality`, `engine`, `fromCache`).

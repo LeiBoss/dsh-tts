@@ -69,7 +69,15 @@ interface TtsServiceLike {
     rate: string
     signal?: AbortSignal
   }): Promise<
-    | { kind: 'audio'; filePath: string; format: string; durationMs: number; timingQuality: 'exact' | 'estimated'; engine: string; words?: SynthResult['words'] }
+    | {
+        kind: 'audio'
+        filePath: string
+        format: string
+        durationMs: number
+        timingQuality: 'exact' | 'estimated'
+        engine: string
+        words?: SynthResult['words']
+      }
     | { kind: 'speechSynthesis'; reason: string }
   >
 }
@@ -121,7 +129,11 @@ function completer(config: VoiceoverConfig): Completer | undefined {
 }
 
 /** Tool definitions; separated so tests can inspect them without a host. */
-export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env: NodeJS.ProcessEnv = process.env): ToolDefinition[] {
+export function createVoiceoverTools(
+  ctx: Context,
+  config: VoiceoverConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): ToolDefinition[] {
   const outputDir = resolveOutputDir(config, env)
   const model = completer(config)
 
@@ -142,34 +154,39 @@ export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env:
     output: {
       schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           projectId: { type: 'string', description: 'Stable identity derived from source + settings.' },
           projectDir: { type: 'string', description: 'Directory holding audio, subtitles, scripts, and the manifest.' },
           status: { type: 'string', description: 'Always `running` for a new project.' },
         },
       },
+      render: (_args, value) => [
+        {
+          type: 'text' as const,
+          text: `Voiceover project ${value.projectId} started. Directory: ${value.projectDir}. Poll voiceover_status for per-chapter progress.`,
+        },
+      ],
     },
-    async execute(args: Record<string, unknown>) {
-      const sourcePath = typeof args.sourcePath === 'string' ? args.sourcePath : undefined
-      const sourceText = typeof args.sourceText === 'string' ? args.sourceText : undefined
-      if (sourcePath === undefined && sourceText === undefined) {
+    async execute(args) {
+      if (args.sourcePath === undefined && args.sourceText === undefined) {
         throw new Error('Provide either sourcePath or sourceText.')
       }
-      if (sourcePath !== undefined && !/\.(md|markdown|txt)$/i.test(sourcePath)) {
+      if (args.sourcePath !== undefined && !/\.(md|markdown|txt)$/i.test(args.sourcePath)) {
         throw new Error('Only .md and .txt sources are supported in this version.')
       }
-      const text = sourcePath === undefined ? (sourceText as string) : await readFile(sourcePath, 'utf8')
+      const text = args.sourcePath === undefined ? (args.sourceText ?? '') : await readFile(args.sourcePath, 'utf8')
       const title =
-        typeof args.title === 'string' && args.title.length > 0
+        args.title !== undefined && args.title.length > 0
           ? args.title
-          : (sourcePath?.replace(/\.[^.]+$/, '').split(/[\\/]/).pop() ?? '未命名')
+          : (args.sourcePath?.replace(/\.[^.]+$/, '').split(/[\\/]/).pop() ?? '未命名')
 
       const deps: PipelineDeps = {
         ...(model === undefined ? {} : { completer: model }),
         synth: engineSynthesizer(ctx),
       }
-      const voice = typeof args.voice === 'string' ? args.voice : (config.defaultVoice ?? 'zh-CN-XiaoxiaoNeural')
-      const style = (typeof args.style === 'string' ? args.style : (config.style ?? 'news')) as StyleProfile
+      const voice = args.voice ?? config.defaultVoice ?? 'zh-CN-XiaoxiaoNeural'
+      const style = (args.style ?? config.style ?? 'news') as StyleProfile
       const rate = config.defaultRate ?? '+0%'
       // The id is deterministic, so it can be reported before the run finishes.
       const projectId = projectKey({ text, voice, rate, style })
@@ -209,17 +226,46 @@ export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env:
     output: {
       schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           projectId: { type: 'string', description: 'Project identity.' },
           done: { type: 'number', description: 'Chapters finished.' },
           total: { type: 'number', description: 'Chapters planned.' },
-          chapters: { type: 'array', items: { type: 'object' }, description: 'Per-chapter status rows.' },
+          chapters: {
+            type: 'array',
+            description: 'Per-chapter status rows.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', description: 'Chapter id such as ch-01.' },
+                title: { type: 'string', description: 'Chapter title.' },
+                status: { type: 'string', description: 'Lifecycle status.' },
+                error: { type: 'string', description: 'Error code when the chapter failed; omitted otherwise.' },
+                durationMs: { type: 'number', description: 'Audio duration in milliseconds; omitted before synthesis.' },
+                subtitles: { type: 'string', description: 'Subtitle path relative to the project; omitted when absent.' },
+              },
+            },
+          },
           warnings: { type: 'array', items: { type: 'string' }, description: 'Degradations recorded by the pipeline.' },
         },
       },
+      render: (_args, value) => [
+        {
+          type: 'text' as const,
+          text: [
+            `${value.done}/${value.total} chapters done.`,
+            ...(value.chapters ?? []).map(
+              (chapter) =>
+                `${chapter.id ?? ''} ${chapter.title ?? ''} - ${chapter.status ?? 'unknown'}${chapter.error === undefined ? '' : ` (${chapter.error})`}`,
+            ),
+            ...((value.warnings ?? []).length === 0 ? [] : ['Warnings:', ...(value.warnings ?? []).map((warning) => `- ${warning}`)]),
+          ].join('\n'),
+        },
+      ],
     },
-    async execute(args: Record<string, unknown>) {
-      const projectId = String(args.projectId ?? '')
+    async execute(args) {
+      const projectId = args.projectId
       const state = await readJson<ProjectState>(join(outputDir, projectId, 'state', 'state.json'))
       if (state === undefined) throw new Error(`Unknown project: ${projectId}`)
       const done = state.chapters.filter((chapter) => chapter.status === 'done').length
@@ -231,9 +277,9 @@ export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env:
           id: chapter.id,
           title: chapter.title,
           status: chapter.status,
-          error: chapter.error?.code ?? null,
-          durationMs: chapter.audio?.durationMs ?? null,
-          subtitles: chapter.subtitles?.path ?? null,
+          ...(chapter.error === undefined ? {} : { error: chapter.error.code }),
+          ...(chapter.audio === undefined ? {} : { durationMs: chapter.audio.durationMs }),
+          ...(chapter.subtitles === undefined ? {} : { subtitles: chapter.subtitles.path }),
         })),
         warnings: state.warnings,
       }
@@ -249,6 +295,7 @@ export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env:
     output: {
       schema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           projectDir: { type: 'string', description: 'Project directory.' },
           manifest: { type: 'string', description: 'Absolute path to manifest.json.' },
@@ -256,9 +303,20 @@ export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env:
           subtitles: { type: 'array', items: { type: 'string' }, description: 'Absolute subtitle paths.' },
         },
       },
+      render: (_args, value) => [
+        {
+          type: 'text' as const,
+          text: [
+            `Project: ${value.projectDir}`,
+            `Manifest: ${value.manifest}`,
+            ...(value.audio ?? []).map((path) => `Audio: ${path}`),
+            ...(value.subtitles ?? []).map((path) => `Subtitles: ${path}`),
+          ].join('\n'),
+        },
+      ],
     },
-    async execute(args: Record<string, unknown>) {
-      const projectId = String(args.projectId ?? '')
+    async execute(args) {
+      const projectId = args.projectId
       const projectDir = join(outputDir, projectId)
       const state = await readJson<ProjectState>(join(projectDir, 'state', 'state.json'))
       if (state === undefined) throw new Error(`Unknown project: ${projectId}`)
@@ -266,7 +324,9 @@ export function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env:
         projectDir,
         manifest: join(projectDir, 'manifest.json'),
         audio: state.chapters.flatMap((chapter) => (chapter.audio === undefined ? [] : [join(projectDir, chapter.audio.path)])),
-        subtitles: state.chapters.flatMap((chapter) => (chapter.subtitles === undefined ? [] : [join(projectDir, chapter.subtitles.path)])),
+        subtitles: state.chapters.flatMap((chapter) =>
+          chapter.subtitles === undefined ? [] : [join(projectDir, chapter.subtitles.path)],
+        ),
       }
     },
   })

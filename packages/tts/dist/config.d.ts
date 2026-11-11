@@ -1,6 +1,9 @@
 import z from '@deepseek-ai/schemastery';
 import { type EngineHealthConfig } from './engine-health.ts';
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
+export declare const DEFAULT_ENGINE = "auto";
+/** Synthesis backends this package understands. */
+export type TtsEngineKind = 'auto' | 'edge-js' | 'edge-py' | 'sapi';
 export declare const DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural";
 /** Rate Edge-TTS uses when the call omits one. */
 export declare const DEFAULT_RATE = "+0%";
@@ -51,6 +54,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     totalTimeoutMs: z<number, number, "defined">;
     trustedHosts: z<string[], string[], "defined">;
     proxy: z<string, string, "plain">;
+    engine: z<"sapi" | "auto" | "edge-js" | "edge-py", "sapi" | "auto" | "edge-js" | "edge-py", "defined">;
     engineHealth: z<Schemastery.ObjectS<NoInfer<{
         enabled: z<boolean, boolean, "defined">;
         failureThreshold: z<number, number, "defined">;
@@ -79,6 +83,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     totalTimeoutMs: z<number, number, "defined">;
     trustedHosts: z<string[], string[], "defined">;
     proxy: z<string, string, "plain">;
+    engine: z<"sapi" | "auto" | "edge-js" | "edge-py", "sapi" | "auto" | "edge-js" | "edge-py", "defined">;
     engineHealth: z<Schemastery.ObjectS<NoInfer<{
         enabled: z<boolean, boolean, "defined">;
         failureThreshold: z<number, number, "defined">;
@@ -110,6 +115,8 @@ export interface TtsConfig {
     trustedHosts?: string[];
     /** HTTP proxy forwarded to edge-tts as `--proxy`; no env fallback. */
     proxy?: string;
+    /** Requested backend; `auto` prefers the pure-JS engine. */
+    engine?: TtsEngineKind;
     /** Engine health state machine tunables; omitted fields use defaults. */
     engineHealth?: Partial<EngineHealthConfig>;
 }
@@ -134,6 +141,8 @@ export interface ResolvedConfig {
     trustedHosts: string[];
     /** Undefined when unset; deliberately never read from the environment. */
     proxy?: string;
+    /** Resolved backend; `auto` is resolved at synthesis time. */
+    engine: TtsEngineKind;
     /** Fully resolved engine health settings. */
     engineHealth: EngineHealthConfig;
 }

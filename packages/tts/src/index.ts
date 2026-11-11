@@ -1,8 +1,8 @@
 /**
  * DSH tool plugin: text in, a durable audio file out.
  *
- * The plugin owns exactly one capability 鈥?Edge-TTS synthesis into
- * `$DSH_HOME/tts-output` 鈥?and exposes it through `tts_generate` plus a
+ * The plugin owns exactly one capability — Edge-TTS synthesis into
+ * `$DSH_HOME/tts-output` — and exposes it through `tts_generate` plus a
  * side-effect-free `tts_self_check`. It deliberately implements no playback,
  * transcription, voice cloning, or multi-provider routing.
  */
@@ -461,7 +461,7 @@ export function createTtsTools(
     })()
     const header = `Generated audio: \`${filePath}\` (${format})`
     if (absolute !== undefined) {
-      return `${header}\n[鈻?鎾斁](${absolute})`
+      return `${header}\n[▶ 播放](${absolute})`
     }
     if (value.browserUrl !== undefined) {
       return `Generated audio: ${filePath} (${format})\nPlayback URL: ${value.browserUrl}`

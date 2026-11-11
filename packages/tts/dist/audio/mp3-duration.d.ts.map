@@ -1,0 +1,1 @@
+{"version":3,"file":"mp3-duration.d.ts","sourceRoot":"","sources":["../../src/audio/mp3-duration.ts"],"names":[],"mappings":"AAAA;;;;;;;GAOG;AAEH,gDAAgD;AAChD,MAAM,WAAW,OAAO;IACtB,+BAA+B;IAC/B,UAAU,EAAE,MAAM,CAAA;IAClB,0DAA0D;IAC1D,MAAM,EAAE,MAAM,CAAA;IACd,UAAU,EAAE,MAAM,CAAA;CACnB;AAgGD;;;;GAIG;AACH,wBAAgB,UAAU,CAAC,MAAM,EAAE,MAAM,GAAG,OAAO,GAAG,SAAS,CA2C9D"}

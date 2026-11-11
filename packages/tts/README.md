@@ -357,3 +357,19 @@ npm run test:integration
 - `npm run test:integration`：真实端到端链路，需要 `edge-tts` 与网络。
 
 `engines.dsh` 必须能匹配当前运行的 DSH 版本；预发布版本（如 `0.2.2-rc.1`）低于同号正式版，写 `>=0.2.2` 会排除它。升级 DSH 后先确认该范围仍然成立。
+## 引擎选择（0.3.0）
+
+| `engine` | 依赖 | 词边界 | 用途 |
+|---|---|---|---|
+| `auto`（默认） | 有 `node-edge-tts` 就用它，否则回落到 CLI | 纯 JS 时精确 | 装完即用 |
+| `edge-js` | `node-edge-tts`（可选依赖，纯 JS） | 精确（`words` 字段） | 无 Python 环境 |
+| `edge-py` | Python + `edge-tts` | 无 | 旧环境 / 已装用户 |
+| `sapi` | Windows 内置 | 无 | 完全离线 |
+
+`ctx.tts.synthesize()` 返回 `{ filePath, format, durationMs, timingQuality, engine, fromCache, words? }`。
+`words` 存在时字幕时间轴可用 `exact`；否则调用方必须按 `estimated` 处理。
+
+```ts
+const audio = await ctx.tts.synthesize({ text: '一段话', voice: 'zh-CN-XiaoxiaoNeural' })
+if (audio.kind === 'audio') console.log(audio.durationMs, audio.words?.length ?? 0)
+```

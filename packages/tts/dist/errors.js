@@ -13,6 +13,7 @@ export const ErrorCode = {
     DshHomeNotSet: 'DSH_HOME_NOT_SET',
     OutputDirNotWritable: 'OUTPUT_DIR_NOT_WRITABLE',
     EdgeTtsNotFound: 'EDGE_TTS_NOT_FOUND',
+    EngineUnavailable: 'ENGINE_UNAVAILABLE',
     SpawnEperm: 'SPAWN_EPERM',
     SpawnFailed: 'SPAWN_FAILED',
     EdgeTtsFailed: 'EDGE_TTS_FAILED',

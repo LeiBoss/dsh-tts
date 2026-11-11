@@ -43,11 +43,11 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover  # 产品或引擎一�
 
 | 能力 | 状态 |
 |---|---|
-| 引擎服务化（`ctx.tts`） | 已实现，待宿主联调 |
+| 引擎服务化（`ctx.tts`） | 已实现 + 单测，宿主联调待做 |
 | 纯 JS 时长测量（MP3 帧解析） | 已实现 + 单测 |
 | 分章 / 改写 / 质检 / 合成 / 字幕 / manifest | 已实现 + 单测 |
 | 断点续跑（内容哈希） | 已实现 + 单测 |
-| 零依赖引擎（`edge-js`） | 未实现（需先确认 node-edge-tts 的运行时 API） |
+| 零依赖引擎（`edge-js`） | 已实现 + 单测：`auto` 默认优先，返回词边界 |
 | 进度面板（client UI） | 未实现 |
 | `voiceover serve` / MCP | 未实现 |
 | zip / m4b 导出 | 未实现 |

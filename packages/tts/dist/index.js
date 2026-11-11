@@ -11,6 +11,7 @@ import { isFallbackEligible, runFallback } from "./fallback.js";
 import { selfCheck } from "./self-check.js";
 import { probeEndpoint } from "./probe.js";
 import { AVAILABLE_VOICES } from "./voices.js";
+import { mountTtsService } from "./register-service.js";
 export { Config } from "./config.js";
 export { ErrorCode, TtsError } from "./errors.js";
 export { cacheKey, findCachedFile } from "./cache.js";
@@ -713,5 +714,8 @@ export function apply(ctx, config) {
     for (const tool of createTtsTools(resolved, { audioRoute, log: debug })) {
         ctx.tools.register(tool);
     }
+    // Publish the engine for other plugins (inject: ['tts']). Best effort:
+    // a host without a service seam still gets the tools.
+    mountTtsService(ctx, resolved);
 }
 //# sourceMappingURL=index.js.map

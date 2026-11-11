@@ -4,6 +4,7 @@ import z from '@deepseek-ai/schemastery';
 import { DEFAULT_ENGINE_HEALTH, } from "./engine-health.js";
 import { ErrorCode, TtsError } from "./errors.js";
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
+export const DEFAULT_ENGINE = 'auto';
 export const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural';
 /** Rate Edge-TTS uses when the call omits one. */
 export const DEFAULT_RATE = '+0%';
@@ -58,6 +59,9 @@ export const Config = z.object({
     totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
     trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
     proxy: z.string(),
+    engine: z
+        .union([z.const('auto'), z.const('edge-js'), z.const('edge-py'), z.const('sapi')])
+        .default(DEFAULT_ENGINE),
     engineHealth: z
         .object({
         enabled: z.boolean().default(DEFAULT_ENGINE_HEALTH.enabled),
@@ -118,6 +122,7 @@ export function resolveConfig(raw, env = process.env) {
             .map((host) => host.trim().toLowerCase())
             .filter((host) => host.length > 0),
         proxy: nonEmpty(raw?.proxy),
+        engine: raw?.engine ?? DEFAULT_ENGINE,
         engineHealth: resolveEngineHealth(raw?.engineHealth),
     };
 }

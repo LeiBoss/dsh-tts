@@ -13,6 +13,7 @@ export declare const ErrorCode: {
     readonly DshHomeNotSet: "DSH_HOME_NOT_SET";
     readonly OutputDirNotWritable: "OUTPUT_DIR_NOT_WRITABLE";
     readonly EdgeTtsNotFound: "EDGE_TTS_NOT_FOUND";
+    readonly EngineUnavailable: "ENGINE_UNAVAILABLE";
     readonly SpawnEperm: "SPAWN_EPERM";
     readonly SpawnFailed: "SPAWN_FAILED";
     readonly EdgeTtsFailed: "EDGE_TTS_FAILED";
