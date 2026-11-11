@@ -1,22 +1,24 @@
 {
   "name": "dsh-tts",
   "version": "0.2.0",
-  "description": "DSH tool plugin that turns text into a saved audio file with Edge-TTS, including web playback, long-text chunking, and fallbacks.",
+  "description": "Text-to-speech plugin for DSH: Edge-TTS, multi-voice, chunked long-text synthesis, and fallback chain.",
   "license": "MIT",
   "author": "LeiBoss",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/LeiBoss/dsh-tts.git"
   },
+  "homepage": "https://github.com/LeiBoss/dsh-tts#readme",
   "bugs": {
     "url": "https://github.com/LeiBoss/dsh-tts/issues"
   },
   "keywords": [
     "dsh-plugin",
+    "dsh",
     "tts",
     "edge-tts",
     "text-to-speech",
-    "audio"
+    "voice"
   ],
   "type": "module",
   "main": "./dist/index.js",

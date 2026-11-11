@@ -1,8 +1,11 @@
 # dsh-tts
 
-> 安装：`dsh plugin add dsh-tts`（未发布 npm 时使用 `dsh plugin add github:LeiBoss/dsh-tts`）
->
-> 问题反馈：https://github.com/LeiBoss/dsh-tts/issues
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
+> Text-to-speech plugin for DSH. Edge-TTS engine, multi-voice, chunked long-text
+> synthesis, fallback chain. Returns playable audio files with browser-accessible URLs.
+
+**Install:** `dsh plugin --profile web add dsh-tts`
 
 ## 简介
 
@@ -53,13 +56,13 @@
 首选 npm（包发布后可用）：
 
 ```bash
-dsh plugin add dsh-tts
+dsh plugin --profile web add dsh-tts
 ```
 
 GitHub 备选：
 
 ```bash
-dsh plugin add github:LeiBoss/dsh-tts
+dsh plugin --profile web add github:LeiBoss/dsh-tts
 ```
 
 仓库包含编译产物 `dist/`。如果从源码工作，先执行：
