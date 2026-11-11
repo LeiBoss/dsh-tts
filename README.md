@@ -5,8 +5,11 @@ npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![CI](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml/badge.svg)](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml)
 
-> Text-to-speech plugin for DSH. Edge-TTS engine, multi-voice, chunked long-text
-> synthesis, fallback chain. Returns playable audio files with browser-accessible URLs.
+> **For plugin authors:** a reliable TTS backend with concurrency control, layered
+> error codes, and provider fallback — designed to be depended on, not just clicked.
+>
+> **For end users:** returns playable audio files with browser-accessible URLs.
+> Bring your own player, or use a reader plugin that calls this backend.
 
 **Install:** `dsh plugin --profile web add @leiboss/dsh-tts`
 
@@ -38,6 +41,23 @@ npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与
 | 文件系统 | 写入 `$DSH_HOME/tts-output/<YYYY-MM-DD>/<hash>-<timestamp>.mp3` |
 
 一次请求的路径：参数校验 → 缓存查找（命中直接返回）→ 同 key 在途请求合并 → 并发槽位 → 分块或一次性合成 → 失败时降级 → 落盘 → 生成签名播放 URL。
+
+## Reliability semantics
+
+This plugin is designed to be called by other plugins and agents, not just by
+end users. The following behaviors are part of its contract:
+
+| Behavior | Guarantee | Error code / field |
+|---|---|---|
+| Concurrency | At most `maxConcurrent` synthesis tasks run simultaneously; excess requests queue up to `queueSize`, then fail fast | `TTS_BUSY` (includes current running count and queue length) |
+| Sandbox rejection | `spawn` blocked by the sandbox is distinguished from upstream failure | `SPAWN_EPERM` (points to sandbox policy, not filesystem) |
+| Upstream failure | Edge-TTS non-zero exit or network timeout | `EDGE_TTS_FAILED` / `SYNTHESIS_TIMEOUT` |
+| Fallback | On Edge-TTS failure, tries engines in `fallbackOrder`; the response marks the engine actually used | `engine` / `fallback` fields |
+| Cache semantics | Cache key is fixed to `(text, voice, rate)`; `pitch`/`volume` are excluded for predictable cache behavior | See “Known limitations” |
+| Lifecycle | Tools, routes, and config listeners are effect-registered and cleaned up on dispose; HMR-safe | — |
+
+These are not feature claims. They are behaviors callers can rely on when
+deciding whether to depend on this plugin.
 
 ## 工具一览
 
@@ -181,6 +201,46 @@ DSH Web 中，工具结果的 `render` 会在拿到宿主 `webServer.getOrigin()
 | `en-US-AriaNeural` | 女 | 英文（美式） | 默认英文女声 |
 | `en-US-GuyNeural` | 男 | 英文（美式） | 英文男声 |
 | `en-US-JennyNeural` | 女 | 英文（美式） | 对话感英文女声 |
+
+## For plugin authors
+
+If you are building a reader plugin, a notification plugin, or an agent that needs
+reliable audio synthesis, you can call `tts_generate` as a tool, or depend on the
+`TTSProvider` interface directly.
+
+**Option A: call the tool** (recommended for agents)
+
+```typescript
+const result = await ctx.tools.call('tts_generate', {
+  text: 'Build completed',
+  voice: 'zh-CN-YunxiNeural',
+})
+// result: { filePath, format, browserUrl?, engine?, fallback? }
+```
+
+**Option B: import the provider** (for plugins that want to own the playback UX)
+
+```typescript
+import type { TTSProvider, SynthesizeResult } from '@leiboss/dsh-tts/provider'
+
+// Resolve a provider instance from the DSH service registry,
+// or construct the Edge-TTS provider directly if you are embedding it.
+```
+
+**Error handling contract**
+
+Treat these error codes differently — the distinction is the point:
+
+| Code | Meaning | Recommended handling |
+|---|---|---|
+| `TTS_BUSY` | Concurrency limit or queue full | Retry after a short delay |
+| `SPAWN_EPERM` | Sandbox blocked subprocess creation | Surface to user as environment issue; do not retry |
+| `EDGE_TTS_FAILED` | Upstream Edge-TTS failure | Trigger your own fallback, or rely on this plugin's fallback chain |
+| `SYNTHESIS_TIMEOUT` | Synthesis exceeded timeout | Retry with shorter text or larger `timeoutMs` |
+| `ALL_FALLBACKS_FAILED` | All engines in `fallbackOrder` failed | Surface to user; do not retry without environment change |
+
+Do not treat all errors as equivalent. A caller that retries `SPAWN_EPERM` will
+loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessarily.
 
 ## 验证
 
