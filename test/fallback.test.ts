@@ -350,12 +350,16 @@ test('SAPI orchestration runs PowerShell then ffmpeg and publishes an MP3', asyn
     )
 
     const ffmpegArgs = calls[1]?.args ?? []
-    const formatIndex = ffmpegArgs.indexOf('-f')
-    assert.ok(formatIndex >= 0, 'ffmpeg must be told the muxer explicitly')
     assert.equal(
-      ffmpegArgs[formatIndex + 1],
-      'mp3',
-      'the partial file has no .mp3 suffix, so -f mp3 is required',
+      ffmpegArgs.includes('-f'),
+      false,
+      'ffmpeg must infer the muxer from the .mp3 output extension',
+    )
+    const outputPath = ffmpegArgs[ffmpegArgs.length - 1] ?? ''
+    assert.match(
+      outputPath,
+      /\.mp3$/,
+      'the partial file needs an .mp3 suffix or ffmpeg refuses to pick a format',
     )
   })
 })
