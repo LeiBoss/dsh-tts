@@ -17,6 +17,7 @@ export declare const ErrorCode: {
     readonly SynthesisTimeout: "SYNTHESIS_TIMEOUT";
     readonly EmptyAudio: "EMPTY_AUDIO";
     readonly Aborted: "ABORTED";
+    readonly TtsBusy: "TTS_BUSY";
     readonly AllFallbacksFailed: "ALL_FALLBACKS_FAILED";
     readonly SpeechSynthesisRequired: "SPEECH_SYNTHESIS_REQUIRED";
 };

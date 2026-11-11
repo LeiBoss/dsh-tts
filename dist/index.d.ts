@@ -9,6 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { type AudioUrlProvider } from './audio-route.ts';
+import { ConcurrencyLimiter } from './concurrency.ts';
 import { type ResolvedConfig, type TtsConfig } from './config.ts';
 import { type SpawnFunction, type SynthesizedAudio } from './edge-tts.ts';
 import type { SapiOptions } from './sapi-tts.ts';
@@ -21,6 +22,7 @@ export { selfCheck } from './self-check.ts';
 export { AUDIO_ROUTE_PREFIX, AudioRoute } from './audio-route.ts';
 export { DEFAULT_CHUNK_SIZE, splitText } from './chunker.ts';
 export { synthesizeChunked } from './chunked-tts.ts';
+export { ConcurrencyLimiter, type ConcurrencyLimits } from './concurrency.ts';
 export { isFallbackEligible, runFallback } from './fallback.ts';
 export { isSapiSupported, sapiRate, synthesizeSapi } from './sapi-tts.ts';
 export { AVAILABLE_VOICES, VOICES, type VoiceInfo } from './voices.ts';
@@ -45,6 +47,10 @@ export interface TtsDependencies {
     sapiSynthesize?: (text: string, options: SapiOptions) => Promise<SynthesizedAudio>;
     powershellBinary?: string;
     ffmpegBinary?: string;
+    /** Inject a limiter to share one capacity pool across tool instances. */
+    limiter?: ConcurrencyLimiter;
+    /** Debug sink for fallback timing; never receives call arguments. */
+    log?: (message: string) => void;
 }
 /**
  * Build both tool definitions from one resolved config. Exported so tests can

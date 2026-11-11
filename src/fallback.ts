@@ -89,7 +89,7 @@ function allFailed(
     .join('; ')
   return new TtsError(
     ErrorCode.AllFallbacksFailed,
-    `All configured TTS fallbacks failed. Chain: ${order.join(' -> ')}. Tried: ${reasons}.`,
+    `All configured TTS fallbacks failed. Chain: ${order.join(' -> ')}. Tried: ${reasons}. Engines: ${JSON.stringify(order)}.`,
     'Install edge-tts and restore network access, or include `speechSynthesis` in `fallbackOrder`.',
     { cause: primaryError },
   )

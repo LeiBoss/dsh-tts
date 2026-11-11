@@ -15,6 +15,7 @@ import {
 } from './audio-route.ts'
 import { AUDIO_FORMAT, cacheKey, findCachedFile } from './cache.ts'
 import { synthesizeChunked } from './chunked-tts.ts'
+import { ConcurrencyLimiter } from './concurrency.ts'
 import {
   Config,
   DEFAULT_RATE,
@@ -43,6 +44,7 @@ export { selfCheck } from './self-check.ts'
 export { AUDIO_ROUTE_PREFIX, AudioRoute } from './audio-route.ts'
 export { DEFAULT_CHUNK_SIZE, splitText } from './chunker.ts'
 export { synthesizeChunked } from './chunked-tts.ts'
+export { ConcurrencyLimiter, type ConcurrencyLimits } from './concurrency.ts'
 export { isFallbackEligible, runFallback } from './fallback.ts'
 export { isSapiSupported, sapiRate, synthesizeSapi } from './sapi-tts.ts'
 export { AVAILABLE_VOICES, VOICES, type VoiceInfo } from './voices.ts'
@@ -84,6 +86,10 @@ export interface TtsDependencies {
   ) => Promise<SynthesizedAudio>
   powershellBinary?: string
   ffmpegBinary?: string
+  /** Inject a limiter to share one capacity pool across tool instances. */
+  limiter?: ConcurrencyLimiter
+  /** Debug sink for fallback timing; never receives call arguments. */
+  log?: (message: string) => void
 }
 
 /**
@@ -160,6 +166,30 @@ export function createTtsTools(
   config: ResolvedConfig,
   deps: TtsDependencies = {},
 ): ToolDefinition[] {
+  const limiter =
+    deps.limiter ??
+    new ConcurrencyLimiter({
+      maxConcurrent: config.maxConcurrent,
+      queueSize: config.queueSize,
+      queueTimeoutMs: config.queueTimeoutMs,
+    })
+  const inFlight = new Map<string, Promise<SynthesisOutcome>>()
+
+  type SynthesisOutcome =
+    | { kind: 'audio'; audio: SynthesizedAudio; engine?: string }
+    | { kind: 'speechSynthesis'; engine: string }
+
+  const renderOutcome = (outcome: SynthesisOutcome) => {
+    if (outcome.kind === 'speechSynthesis') {
+      return {
+        filePath: '',
+        format: '',
+        engine: outcome.engine,
+        fallback: outcome.engine,
+      }
+    }
+    return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine)
+  }
   const generate = defineTool({
     name: 'tts_generate',
     description: generateDescription(),
@@ -265,77 +295,103 @@ export function createTtsTools(
         )
       }
 
-      const primary = async (): Promise<SynthesizedAudio> =>
-        chunkingEnabled && text.length > chunkSize
-          ? await synthesizeChunked(text, {
-              voice,
-              rate,
-              pitch,
-              volume,
-              binary: config.edgeTtsBinary,
-              outputDir,
-              hash,
-              timeoutMs,
-              chunkSize,
-              signal: exec.signal,
-              spawnImpl: deps.spawnImpl,
-              now: deps.now?.(),
-              interChunkDelayMs: deps.chunkDelayMs,
-            })
-          : await synthesize(text, {
-              voice,
-              rate,
-              pitch,
-              volume,
-              binary: config.edgeTtsBinary,
-              outputDir,
-              hash,
-              timeoutMs,
-              signal: exec.signal,
-              spawnImpl: deps.spawnImpl,
-              now: deps.now?.(),
-            })
-
-      let audio: SynthesizedAudio
-      try {
-        audio = await primary()
-      } catch (error) {
-        // Validation, config, cache, and abort errors never fall back.
-        if (!fallbackEnabled || !isFallbackEligible(error)) throw error
-
-        const outcome = await runFallback(
-          {
-            text,
-            rate,
-            outputDir,
-            hash,
-            timeoutMs,
-            fallbackOrder,
-            signal: exec.signal,
-            now: deps.now?.(),
-            primaryError: error,
-          },
-          {
-            platform: deps.platform,
-            spawnImpl: deps.spawnImpl,
-            powershellBinary: deps.powershellBinary,
-            ffmpegBinary: deps.ffmpegBinary,
-            synthesizeSapiImpl: deps.sapiSynthesize,
-          },
-        )
-
-        if (outcome.kind === 'speechSynthesis') {
-          return {
-            filePath: '',
-            format: '',
-            engine: outcome.engine,
-            fallback: outcome.engine,
-          }
-        }
-        return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine)
+      // Identical in-flight requests share one synthesis; they never consume
+      // another slot. Different pitch/volume share the key by design, matching
+      // the documented cache behaviour.
+      const existing = inFlight.get(hash)
+      if (existing !== undefined) {
+        return renderOutcome(await existing)
       }
 
-      return canonicalAudio(audio, deps.audioRoute)
+      const task = limiter.run<SynthesisOutcome>(async () => {
+        // A request that waited for a slot may find the file already produced.
+        const ready = await findCachedFile(outputDir, hash)
+        if (ready !== undefined) {
+          return {
+            kind: 'audio',
+            audio: { filePath: ready, format: AUDIO_FORMAT },
+          }
+        }
+
+        const primary = async (): Promise<SynthesizedAudio> =>
+          chunkingEnabled && text.length > chunkSize
+            ? await synthesizeChunked(text, {
+                voice,
+                rate,
+                pitch,
+                volume,
+                binary: config.edgeTtsBinary,
+                outputDir,
+                hash,
+                timeoutMs,
+                chunkSize,
+                signal: exec.signal,
+                spawnImpl: deps.spawnImpl,
+                now: deps.now?.(),
+                interChunkDelayMs: deps.chunkDelayMs,
+              })
+            : await synthesize(text, {
+                voice,
+                rate,
+                pitch,
+                volume,
+                binary: config.edgeTtsBinary,
+                outputDir,
+                hash,
+                timeoutMs,
+                signal: exec.signal,
+                spawnImpl: deps.spawnImpl,
+                now: deps.now?.(),
+              })
+
+        try {
+          return { kind: 'audio', audio: await primary() }
+        } catch (error) {
+          // Validation, config, cache, and abort errors never fall back.
+          if (!fallbackEnabled || !isFallbackEligible(error)) throw error
+
+          const started = Date.now()
+          const outcome = await runFallback(
+            {
+              text,
+              rate,
+              outputDir,
+              hash,
+              timeoutMs,
+              fallbackOrder,
+              signal: exec.signal,
+              now: deps.now?.(),
+              primaryError: error,
+            },
+            {
+              platform: deps.platform,
+              spawnImpl: deps.spawnImpl,
+              powershellBinary: deps.powershellBinary,
+              ffmpegBinary: deps.ffmpegBinary,
+              synthesizeSapiImpl: deps.sapiSynthesize,
+            },
+          )
+          deps.log?.(
+            `fallback engine=${outcome.engine} elapsedMs=${Date.now() - started}`,
+          )
+
+          if (outcome.kind === 'speechSynthesis') {
+            return { kind: 'speechSynthesis', engine: outcome.engine }
+          }
+          return {
+            kind: 'audio',
+            audio: outcome.audio,
+            engine: outcome.engine,
+          }
+        }
+      }, exec.signal)
+
+      inFlight.set(hash, task)
+      try {
+        return renderOutcome(await task)
+      } finally {
+        if (inFlight.get(hash) === task) inFlight.delete(hash)
+      }
     },
   })
 
@@ -404,8 +460,13 @@ export function createTtsTools(
  */
 export function apply(ctx: Context, config?: Partial<TtsConfig>): void {
   const resolved = resolveConfig(config)
+  const logger =
+    typeof ctx.logger === 'function' ? ctx.logger('dsh-tts') : undefined
+  const debug = (message: string): void => {
+    logger?.debug(message)
+  }
   const audioRoute = resolved.outputDir
-    ? new AudioRoute({ outputDir: resolved.outputDir })
+    ? new AudioRoute({ outputDir: resolved.outputDir, debug })
     : undefined
 
   // Optional dependency: non-Web runtimes (for example Electron over file://)
@@ -419,7 +480,7 @@ export function apply(ctx: Context, config?: Partial<TtsConfig>): void {
     })
   }
 
-  for (const tool of createTtsTools(resolved, { audioRoute })) {
+  for (const tool of createTtsTools(resolved, { audioRoute, log: debug })) {
     ctx.tools.register(tool)
   }
 }

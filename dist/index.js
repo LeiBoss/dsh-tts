@@ -2,6 +2,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { AudioRoute, } from "./audio-route.js";
 import { AUDIO_FORMAT, cacheKey, findCachedFile } from "./cache.js";
 import { synthesizeChunked } from "./chunked-tts.js";
+import { ConcurrencyLimiter } from "./concurrency.js";
 import { Config, DEFAULT_RATE, requireSynthesisConfig, resolveConfig, } from "./config.js";
 import { synthesize, } from "./edge-tts.js";
 import { ErrorCode, TtsError } from "./errors.js";
@@ -16,6 +17,7 @@ export { selfCheck } from "./self-check.js";
 export { AUDIO_ROUTE_PREFIX, AudioRoute } from "./audio-route.js";
 export { DEFAULT_CHUNK_SIZE, splitText } from "./chunker.js";
 export { synthesizeChunked } from "./chunked-tts.js";
+export { ConcurrencyLimiter } from "./concurrency.js";
 export { isFallbackEligible, runFallback } from "./fallback.js";
 export { isSapiSupported, sapiRate, synthesizeSapi } from "./sapi-tts.js";
 export { AVAILABLE_VOICES, VOICES } from "./voices.js";
@@ -82,6 +84,24 @@ function selfCheckDescription() {
  * exercise the real `execute` bodies with an injected spawn implementation.
  */
 export function createTtsTools(config, deps = {}) {
+    const limiter = deps.limiter ??
+        new ConcurrencyLimiter({
+            maxConcurrent: config.maxConcurrent,
+            queueSize: config.queueSize,
+            queueTimeoutMs: config.queueTimeoutMs,
+        });
+    const inFlight = new Map();
+    const renderOutcome = (outcome) => {
+        if (outcome.kind === 'speechSynthesis') {
+            return {
+                filePath: '',
+                format: '',
+                engine: outcome.engine,
+                fallback: outcome.engine,
+            };
+        }
+        return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine);
+    };
     const generate = defineTool({
         name: 'tts_generate',
         description: generateDescription(),
@@ -167,71 +187,95 @@ export function createTtsTools(config, deps = {}) {
             if (cached !== undefined) {
                 return canonicalAudio({ filePath: cached, format: AUDIO_FORMAT }, deps.audioRoute);
             }
-            const primary = async () => chunkingEnabled && text.length > chunkSize
-                ? await synthesizeChunked(text, {
-                    voice,
-                    rate,
-                    pitch,
-                    volume,
-                    binary: config.edgeTtsBinary,
-                    outputDir,
-                    hash,
-                    timeoutMs,
-                    chunkSize,
-                    signal: exec.signal,
-                    spawnImpl: deps.spawnImpl,
-                    now: deps.now?.(),
-                    interChunkDelayMs: deps.chunkDelayMs,
-                })
-                : await synthesize(text, {
-                    voice,
-                    rate,
-                    pitch,
-                    volume,
-                    binary: config.edgeTtsBinary,
-                    outputDir,
-                    hash,
-                    timeoutMs,
-                    signal: exec.signal,
-                    spawnImpl: deps.spawnImpl,
-                    now: deps.now?.(),
-                });
-            let audio;
-            try {
-                audio = await primary();
+            // Identical in-flight requests share one synthesis; they never consume
+            // another slot. Different pitch/volume share the key by design, matching
+            // the documented cache behaviour.
+            const existing = inFlight.get(hash);
+            if (existing !== undefined) {
+                return renderOutcome(await existing);
             }
-            catch (error) {
-                // Validation, config, cache, and abort errors never fall back.
-                if (!fallbackEnabled || !isFallbackEligible(error))
-                    throw error;
-                const outcome = await runFallback({
-                    text,
-                    rate,
-                    outputDir,
-                    hash,
-                    timeoutMs,
-                    fallbackOrder,
-                    signal: exec.signal,
-                    now: deps.now?.(),
-                    primaryError: error,
-                }, {
-                    platform: deps.platform,
-                    spawnImpl: deps.spawnImpl,
-                    powershellBinary: deps.powershellBinary,
-                    ffmpegBinary: deps.ffmpegBinary,
-                    synthesizeSapiImpl: deps.sapiSynthesize,
-                });
-                if (outcome.kind === 'speechSynthesis') {
+            const task = limiter.run(async () => {
+                // A request that waited for a slot may find the file already produced.
+                const ready = await findCachedFile(outputDir, hash);
+                if (ready !== undefined) {
                     return {
-                        filePath: '',
-                        format: '',
-                        engine: outcome.engine,
-                        fallback: outcome.engine,
+                        kind: 'audio',
+                        audio: { filePath: ready, format: AUDIO_FORMAT },
                     };
                 }
-                return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine);
+                const primary = async () => chunkingEnabled && text.length > chunkSize
+                    ? await synthesizeChunked(text, {
+                        voice,
+                        rate,
+                        pitch,
+                        volume,
+                        binary: config.edgeTtsBinary,
+                        outputDir,
+                        hash,
+                        timeoutMs,
+                        chunkSize,
+                        signal: exec.signal,
+                        spawnImpl: deps.spawnImpl,
+                        now: deps.now?.(),
+                        interChunkDelayMs: deps.chunkDelayMs,
+                    })
+                    : await synthesize(text, {
+                        voice,
+                        rate,
+                        pitch,
+                        volume,
+                        binary: config.edgeTtsBinary,
+                        outputDir,
+                        hash,
+                        timeoutMs,
+                        signal: exec.signal,
+                        spawnImpl: deps.spawnImpl,
+                        now: deps.now?.(),
+                    });
+                try {
+                    return { kind: 'audio', audio: await primary() };
+                }
+                catch (error) {
+                    // Validation, config, cache, and abort errors never fall back.
+                    if (!fallbackEnabled || !isFallbackEligible(error))
+                        throw error;
+                    const started = Date.now();
+                    const outcome = await runFallback({
+                        text,
+                        rate,
+                        outputDir,
+                        hash,
+                        timeoutMs,
+                        fallbackOrder,
+                        signal: exec.signal,
+                        now: deps.now?.(),
+                        primaryError: error,
+                    }, {
+                        platform: deps.platform,
+                        spawnImpl: deps.spawnImpl,
+                        powershellBinary: deps.powershellBinary,
+                        ffmpegBinary: deps.ffmpegBinary,
+                        synthesizeSapiImpl: deps.sapiSynthesize,
+                    });
+                    deps.log?.(`fallback engine=${outcome.engine} elapsedMs=${Date.now() - started}`);
+                    if (outcome.kind === 'speechSynthesis') {
+                        return { kind: 'speechSynthesis', engine: outcome.engine };
+                    }
+                    return {
+                        kind: 'audio',
+                        audio: outcome.audio,
+                        engine: outcome.engine,
+                    };
+                }
+            }, exec.signal);
+            inFlight.set(hash, task);
+            try {
+                return renderOutcome(await task);
             }
-            return canonicalAudio(audio, deps.audioRoute);
+            finally {
+                if (inFlight.get(hash) === task)
+                    inFlight.delete(hash);
+            }
         },
     });
     const check = defineTool({
@@ -296,8 +340,12 @@ export function createTtsTools(config, deps = {}) {
  */
 export function apply(ctx, config) {
     const resolved = resolveConfig(config);
+    const logger = typeof ctx.logger === 'function' ? ctx.logger('dsh-tts') : undefined;
+    const debug = (message) => {
+        logger?.debug(message);
+    };
     const audioRoute = resolved.outputDir
-        ? new AudioRoute({ outputDir: resolved.outputDir })
+        ? new AudioRoute({ outputDir: resolved.outputDir, debug })
         : undefined;
     // Optional dependency: non-Web runtimes (for example Electron over file://)
     // never provide `httpServer`, and the plugin still works without browserUrl.
@@ -310,7 +358,7 @@ export function apply(ctx, config) {
             webCtx.effect(() => audioRoute.register(server));
         });
     }
-    for (const tool of createTtsTools(resolved, { audioRoute })) {
+    for (const tool of createTtsTools(resolved, { audioRoute, log: debug })) {
         ctx.tools.register(tool);
     }
 }
