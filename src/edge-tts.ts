@@ -144,7 +144,7 @@ export function runProcess(
         new TtsError(
           ErrorCode.SynthesisTimeout,
           `Edge-TTS did not finish within ${options.timeoutMs} ms.`,
-          'Increase `timeoutMs` or check network connectivity to the Edge-TTS service.',
+          'Increase `timeoutMs` or check network connectivity to the Edge-TTS service. 若网络正常但持续超时，请检查是否需要对 speech.platform.bing.com:443 配置代理。注意：环境变量 HTTPS_PROXY 对 edge-tts 的 WSS 连接无效，必须通过本插件的 `proxy` 配置项透传 `--proxy` 参数。详见 README 的「已知限制」章节。',
         ),
       )
       stop()
@@ -165,6 +165,11 @@ export interface SynthesizeOptions {
   pitch?: string
   /** Volume adjustment such as `-10%`; omitted for Edge-TTS's own default. */
   volume?: string
+  /**
+   * HTTP proxy for the WSS connection, forwarded as `--proxy`. Edge-TTS does
+   * not honour `HTTPS_PROXY`, so this is the only way to route it.
+   */
+  proxy?: string
   binary: string
   outputDir: string
   /** Stable cache key; also names the output file. */
@@ -221,6 +226,7 @@ export async function synthesize(
     `--rate=${options.rate}`,
     ...(options.pitch === undefined ? [] : [`--pitch=${options.pitch}`]),
     ...(options.volume === undefined ? [] : [`--volume=${options.volume}`]),
+    ...(options.proxy === undefined ? [] : [`--proxy=${options.proxy}`]),
     `--write-media=${partialPath}`,
   ]
 
@@ -237,7 +243,7 @@ export async function synthesize(
       throw new TtsError(
         ErrorCode.EdgeTtsFailed,
         `Edge-TTS exited with code ${status}${signal}.${stderrSuffix(result.stderr)}`,
-        'Check the voice and rate values and network connectivity, then run `tts_self_check`.',
+        'Check the voice and rate values and network connectivity, then run `tts_self_check`. 若网络正常但持续超时，请检查是否需要对 speech.platform.bing.com:443 配置代理。注意：环境变量 HTTPS_PROXY 对 edge-tts 的 WSS 连接无效，必须通过本插件的 `proxy` 配置项透传 `--proxy` 参数。详见 README 的「已知限制」章节。',
       )
     }
 

@@ -75,6 +75,7 @@ export const Config = z.object({
   queueTimeoutMs: z.number().default(DEFAULT_QUEUE_TIMEOUT_MS),
   totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
   trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
+  proxy: z.string(),
 })
 
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
@@ -92,6 +93,8 @@ export interface TtsConfig {
   queueTimeoutMs?: number
   totalTimeoutMs?: number
   trustedHosts?: string[]
+  /** HTTP proxy forwarded to edge-tts as `--proxy`; no env fallback. */
+  proxy?: string
 }
 
 /** Effective, path-resolved plugin settings. */
@@ -113,6 +116,8 @@ export interface ResolvedConfig {
   queueTimeoutMs: number
   totalTimeoutMs: number
   trustedHosts: string[]
+  /** Undefined when unset; deliberately never read from the environment. */
+  proxy?: string
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -157,6 +162,7 @@ export function resolveConfig(
     trustedHosts: (raw?.trustedHosts ?? [...DEFAULT_TRUSTED_HOSTS])
       .map((host) => host.trim().toLowerCase())
       .filter((host) => host.length > 0),
+    proxy: nonEmpty(raw?.proxy),
   }
 }
 
@@ -176,6 +182,7 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
   queueTimeoutMs: number
   totalTimeoutMs: number
   trustedHosts: string[]
+  proxy?: string
 } {
   if (!config.outputDir) {
     throw new TtsError(
@@ -244,5 +251,6 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
     queueTimeoutMs: config.queueTimeoutMs,
     totalTimeoutMs: config.totalTimeoutMs,
     trustedHosts: config.trustedHosts,
+    proxy: config.proxy,
   }
 }

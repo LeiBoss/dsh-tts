@@ -7,6 +7,8 @@ export interface SelfCheckResult {
     spawnAllowed: boolean;
     outputDirWritable: boolean;
     dshHome: string;
+    /** Whether a proxy is configured for the Edge-TTS subprocess. */
+    proxyConfigured: boolean;
 }
 /** Injection points for the self-check. */
 export interface SelfCheckOptions {

@@ -64,7 +64,8 @@ deciding whether to depend on this plugin.
 | 工具 | 参数 | 返回 | 何时调用 |
 | --- | --- | --- | --- |
 | `tts_generate` | `text`（必填）、`voice`、`rate`、`pitch`、`volume` | `{ filePath, format, browserUrl?, engine?, fallback?, text?, voice?, rate? }` | 用户要求把文字读出来、生成配音或音频文件时 |
-| `tts_self_check` | 无 | `{ edgeTtsAvailable, edgeTtsVersion?, spawnAllowed, outputDirWritable, dshHome, availableVoices }` | 安装后自检，或 `tts_generate` 报环境类错误时 |
+| `tts_self_check` | 无 | `{ edgeTtsAvailable, edgeTtsVersion?, spawnAllowed, outputDirWritable, dshHome, proxyConfigured, availableVoices }` | 安装后自检，或 `tts_generate` 报环境类错误时 |
+| `tts_probe_network` | `timeoutMs`（可选，默认 1500，上限 5000） | `{ host, port, reachable, elapsedMs, proxyConfigured }` | 怀疑网络到 Edge-TTS 端点不通时显式调用；会发起一次 TCP 连接，不合成音频、不消耗配额 |
 
 `tts_generate` 不播放音频、不转录音频、不克隆或修改音色、不做音频后处理，也不生成音乐。`filePath` 与 `format` 在正常合成时存在；当返回 `fallback: "speechSynthesis"` 时只返回 `text`、`voice`、`rate`，由调用方朗读。当前不提供音频时长。
 
@@ -138,6 +139,7 @@ npm run build
 | `queueTimeoutMs` | `10000` | 排队等待上限，超时返回 `TTS_BUSY` | 插件 config 的 `queueTimeoutMs` |
 | `totalTimeoutMs` | `180000` | 一次 `tts_generate` 的总预算，覆盖所有分块与块间延迟 | 插件 config 的 `totalTimeoutMs` |
 | `trustedHosts` | `[]` | 反向代理场景的额外 Host 白名单；非空时跳过端口钉死 | 插件 config 的 `trustedHosts` |
+| `proxy` | `undefined` | 为 Edge-TTS 子进程配置 HTTP 代理，透传为 `--proxy`；留空则不追加参数 | 插件 config 的 `proxy` |
 
 ## 使用
 
@@ -301,6 +303,8 @@ npm run test:integration
 - **签名密钥可轮换**：密钥存于 `<outputDir>/.audio-route-secret`，删除即让已发出的全部链接失效；文件读取/写入失败时回退内存密钥并只影响本次进程。
 - **分块是字节拼接**：MP3 直接按字节拼接，不重新编码。缓解：长文本仍产出一个可播放文件；若播放器兼容性异常，可关闭分块或改用外部工具后处理。
 - **不提供音频时长**：输出 schema 不再声明 `durationMs`，需要时长请用外部工具探测。
+- **环境变量代理对 Edge-TTS 无效**：edge-tts 的 WSS 连接不读取 `HTTPS_PROXY` / `https_proxy`，设置环境变量不会生效；必须通过本插件的 `proxy` 配置项透传 `--proxy`。
+- **端点单一，无自动迁移**：edge-tts 7.3.1 只有一个端点 `speech.platform.bing.com`。如果该端点在当前网络不可达，只能通过 `proxy` 或降级到 SAPI / `speechSynthesis`；可用 `tts_probe_network` 做一次 TCP 可达性判断。
 
 ## 错误码
 
@@ -317,8 +321,8 @@ npm run test:integration
 | `EDGE_TTS_NOT_FOUND` | 找不到 `edge-tts` | `pip install edge-tts` 或设置 `edgeTtsBinary` |
 | `SPAWN_EPERM` | 沙箱拒绝创建子进程（参见「能力接缝与沙箱」） | 调整 DSH 沙箱进程策略，不是文件权限问题 |
 | `SPAWN_FAILED` | 其他子进程创建失败 | 检查 `edgeTtsBinary` 是否可执行 |
-| `EDGE_TTS_FAILED` | Edge-TTS 非零退出 | 查看错误中的退出码与 stderr，检查网络与音色 |
-| `SYNTHESIS_TIMEOUT` | 单个子进程超过 `timeoutMs`，或整次调用超过 `totalTimeoutMs` | 增大对应超时、缩短文本或检查网络 |
+| `EDGE_TTS_FAILED` | Edge-TTS 非零退出 | 查看错误中的退出码与 stderr，检查网络与音色；持续失败时先运行 `tts_probe_network`，若不可达请配置 `proxy`（环境变量对 WSS 无效） |
+| `SYNTHESIS_TIMEOUT` | 单个子进程超过 `timeoutMs`，或整次调用超过 `totalTimeoutMs` | 增大对应超时、缩短文本；若网络正常但仍超时，运行 `tts_probe_network` 并用 `proxy` 配置项透传 `--proxy` |
 | `EMPTY_AUDIO` | Edge-TTS 退出成功但音频为空 | 重试；仍失败时运行 `tts_self_check` |
 | `ABORTED` | 调用被取消 | 无需处理；调用方已取消 |
 | `TTS_BUSY` | 队列满或排队超时 | 稍后重试，或增大 `maxConcurrent` / `queueSize` / `queueTimeoutMs` |

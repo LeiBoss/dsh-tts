@@ -49,6 +49,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     queueTimeoutMs: z<number, number, "defined">;
     totalTimeoutMs: z<number, number, "defined">;
     trustedHosts: z<string[], string[], "defined">;
+    proxy: z<string, string, "plain">;
 }>>, Schemastery.ObjectT<NoInfer<{
     outputDir: z<string, string, "plain">;
     defaultVoice: z<string, string, "defined">;
@@ -63,6 +64,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     queueTimeoutMs: z<number, number, "defined">;
     totalTimeoutMs: z<number, number, "defined">;
     trustedHosts: z<string[], string[], "defined">;
+    proxy: z<string, string, "plain">;
 }>>, "plain">;
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
 export interface TtsConfig {
@@ -79,6 +81,8 @@ export interface TtsConfig {
     queueTimeoutMs?: number;
     totalTimeoutMs?: number;
     trustedHosts?: string[];
+    /** HTTP proxy forwarded to edge-tts as `--proxy`; no env fallback. */
+    proxy?: string;
 }
 /** Effective, path-resolved plugin settings. */
 export interface ResolvedConfig {
@@ -99,6 +103,8 @@ export interface ResolvedConfig {
     queueTimeoutMs: number;
     totalTimeoutMs: number;
     trustedHosts: string[];
+    /** Undefined when unset; deliberately never read from the environment. */
+    proxy?: string;
 }
 /**
  * Resolve config defaults without touching the filesystem. A missing
@@ -122,5 +128,6 @@ export declare function requireSynthesisConfig(config: ResolvedConfig): {
     queueTimeoutMs: number;
     totalTimeoutMs: number;
     trustedHosts: string[];
+    proxy?: string;
 };
 //# sourceMappingURL=config.d.ts.map

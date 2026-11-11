@@ -13,6 +13,7 @@ import { ConcurrencyLimiter } from './concurrency.ts';
 import { type ResolvedConfig, type TtsConfig } from './config.ts';
 import { type SpawnFunction, type SynthesizedAudio } from './edge-tts.ts';
 import type { SapiOptions } from './sapi-tts.ts';
+import { type ProbeConnector } from './probe.ts';
 export { Config } from './config.ts';
 export type { TtsConfig } from './config.ts';
 export type { TTSProvider, SynthesizeOptions, SynthesizeResult, } from './provider.ts';
@@ -52,6 +53,8 @@ export interface TtsDependencies {
     limiter?: ConcurrencyLimiter;
     /** Debug sink for fallback timing; never receives call arguments. */
     log?: (message: string) => void;
+    /** Injected TCP connector for `tts_probe_network`; tests use a local server. */
+    probeConnect?: ProbeConnector;
 }
 /**
  * Build both tool definitions from one resolved config. Exported so tests can

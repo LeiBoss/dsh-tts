@@ -8,6 +8,8 @@ export interface ChunkedSynthesisOptions {
     pitch?: string;
     /** Applied uniformly to every chunk. */
     volume?: string;
+    /** Forwarded to every chunk subprocess as `--proxy`. */
+    proxy?: string;
     binary: string;
     outputDir: string;
     /** Cache key of the full original text. */

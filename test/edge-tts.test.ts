@@ -196,6 +196,7 @@ test('self-check reports an available binary and its version', async () => {
       spawnAllowed: true,
       outputDirWritable: true,
       dshHome: '/tmp/dsh-home',
+      proxyConfigured: false,
     })
   })
 })
