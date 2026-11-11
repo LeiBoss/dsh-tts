@@ -8,7 +8,13 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import {
+  AudioRoute,
+  type AudioUrlProvider,
+  type HttpRouteRegistrar,
+} from './audio-route.ts'
 import { AUDIO_FORMAT, cacheKey, findCachedFile } from './cache.ts'
+import { synthesizeChunked } from './chunked-tts.ts'
 import {
   Config,
   DEFAULT_RATE,
@@ -17,8 +23,14 @@ import {
   type ResolvedConfig,
   type TtsConfig,
 } from './config.ts'
-import { synthesize, type SpawnFunction } from './edge-tts.ts'
+import {
+  synthesize,
+  type SpawnFunction,
+  type SynthesizedAudio,
+} from './edge-tts.ts'
 import { ErrorCode, TtsError } from './errors.ts'
+import { isFallbackEligible, runFallback } from './fallback.ts'
+import type { SapiOptions } from './sapi-tts.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
 
 export { Config } from './config.ts'
@@ -27,6 +39,11 @@ export { ErrorCode, TtsError } from './errors.ts'
 export { cacheKey, findCachedFile } from './cache.ts'
 export { runProcess, synthesize } from './edge-tts.ts'
 export { selfCheck } from './self-check.ts'
+export { AUDIO_ROUTE_PREFIX, AudioRoute } from './audio-route.ts'
+export { DEFAULT_CHUNK_SIZE, splitText } from './chunker.ts'
+export { synthesizeChunked } from './chunked-tts.ts'
+export { isFallbackEligible, runFallback } from './fallback.ts'
+export { isSapiSupported, sapiRate, synthesizeSapi } from './sapi-tts.ts'
 
 export const name = 'dsh-tts'
 
@@ -46,6 +63,38 @@ const RATE_PATTERN = /^[+-]\d{1,3}%$/
 export interface TtsDependencies {
   spawnImpl?: SpawnFunction
   now?: () => Date
+  /** Present when a web route was registered; enables `browserUrl`. */
+  audioRoute?: AudioUrlProvider
+  /** Override the pause between chunk subprocesses (tests use 0). */
+  chunkDelayMs?: number
+  /** Platform override, so non-Windows tests can exercise the SAPI branch. */
+  platform?: NodeJS.Platform
+  /** Injected SAPI implementation; defaults to the real PowerShell path. */
+  sapiSynthesize?: (
+    text: string,
+    options: SapiOptions,
+  ) => Promise<SynthesizedAudio>
+  powershellBinary?: string
+  ffmpegBinary?: string
+}
+
+/**
+ * Canonical tool value. Only the fields declared in `output.schema` may
+ * appear; `browserUrl` is omitted when the host offers no web route and
+ * `engine` is omitted when the default Edge-TTS path produced the file.
+ */
+function canonicalAudio(
+  audio: SynthesizedAudio,
+  audioRoute: AudioUrlProvider | undefined,
+  engine?: string,
+): { filePath: string; format: string; browserUrl?: string; engine?: string } {
+  const browserUrl = audioRoute?.urlFor(audio.filePath)
+  return {
+    filePath: audio.filePath,
+    format: audio.format,
+    ...(browserUrl === undefined ? {} : { browserUrl }),
+    ...(engine === undefined ? {} : { engine }),
+  }
 }
 
 function requireText(text: string): void {
@@ -139,13 +188,33 @@ export function createTtsTools(
             type: 'number',
             description: 'Duration in milliseconds, when known.',
           },
+          browserUrl: {
+            type: 'string',
+            description:
+              'Same-origin URL that plays this audio in the DSH Web UI; absent when no web route is available.',
+          },
+          engine: {
+            type: 'string',
+            description:
+              'Engine that produced the audio when it was not the default Edge-TTS path, for example `sapi`.',
+          },
+          fallback: {
+            type: 'string',
+            description:
+              '`speechSynthesis` when no host audio file was produced and the caller should speak the text with the browser API.',
+          },
         },
         additionalProperties: false,
       },
       render: (_args, value) => [
         {
           type: 'text' as const,
-          text: `Generated audio: ${value.filePath} (${value.format})`,
+          text:
+            value.fallback === 'speechSynthesis'
+              ? `${ErrorCode.SpeechSynthesisRequired}: no host audio file was produced. Use the browser speechSynthesis API to read the text.`
+              : value.browserUrl
+                ? `Generated audio: ${value.filePath} (${value.format})\nPlayback URL: ${value.browserUrl}`
+                : `Generated audio: ${value.filePath} (${value.format})`,
         },
       ],
     },
@@ -159,27 +228,91 @@ export function createTtsTools(
       const rate = args.rate?.trim() || DEFAULT_RATE
       requireRate(rate)
 
-      const { outputDir, timeoutMs } = requireSynthesisConfig(config)
+      const {
+        outputDir,
+        timeoutMs,
+        chunkSize,
+        chunkingEnabled,
+        fallbackEnabled,
+        fallbackOrder,
+      } = requireSynthesisConfig(config)
       const hash = cacheKey(text, voice, rate)
 
       const cached = await findCachedFile(outputDir, hash)
       if (cached !== undefined) {
-        return { filePath: cached, format: AUDIO_FORMAT }
+        return canonicalAudio(
+          { filePath: cached, format: AUDIO_FORMAT },
+          deps.audioRoute,
+        )
       }
 
-      const audio = await synthesize(text, {
-        voice,
-        rate,
-        binary: config.edgeTtsBinary,
-        outputDir,
-        hash,
-        timeoutMs,
-        signal: exec.signal,
-        spawnImpl: deps.spawnImpl,
-        now: deps.now?.(),
-      })
+      const primary = async (): Promise<SynthesizedAudio> =>
+        chunkingEnabled && text.length > chunkSize
+          ? await synthesizeChunked(text, {
+              voice,
+              rate,
+              binary: config.edgeTtsBinary,
+              outputDir,
+              hash,
+              timeoutMs,
+              chunkSize,
+              signal: exec.signal,
+              spawnImpl: deps.spawnImpl,
+              now: deps.now?.(),
+              interChunkDelayMs: deps.chunkDelayMs,
+            })
+          : await synthesize(text, {
+              voice,
+              rate,
+              binary: config.edgeTtsBinary,
+              outputDir,
+              hash,
+              timeoutMs,
+              signal: exec.signal,
+              spawnImpl: deps.spawnImpl,
+              now: deps.now?.(),
+            })
 
-      return { filePath: audio.filePath, format: audio.format }
+      let audio: SynthesizedAudio
+      try {
+        audio = await primary()
+      } catch (error) {
+        // Validation, config, cache, and abort errors never fall back.
+        if (!fallbackEnabled || !isFallbackEligible(error)) throw error
+
+        const outcome = await runFallback(
+          {
+            text,
+            rate,
+            outputDir,
+            hash,
+            timeoutMs,
+            fallbackOrder,
+            signal: exec.signal,
+            now: deps.now?.(),
+            primaryError: error,
+          },
+          {
+            platform: deps.platform,
+            spawnImpl: deps.spawnImpl,
+            powershellBinary: deps.powershellBinary,
+            ffmpegBinary: deps.ffmpegBinary,
+            synthesizeSapiImpl: deps.sapiSynthesize,
+          },
+        )
+
+        if (outcome.kind === 'speechSynthesis') {
+          return {
+            filePath: '',
+            format: '',
+            engine: outcome.engine,
+            fallback: outcome.engine,
+          }
+        }
+        return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine)
+      }
+
+      return canonicalAudio(audio, deps.audioRoute)
     },
   })
 
@@ -240,7 +373,22 @@ export function createTtsTools(
  */
 export function apply(ctx: Context, config?: Partial<TtsConfig>): void {
   const resolved = resolveConfig(config)
-  for (const tool of createTtsTools(resolved)) {
+  const audioRoute = resolved.outputDir
+    ? new AudioRoute({ outputDir: resolved.outputDir })
+    : undefined
+
+  // Optional dependency: non-Web runtimes (for example Electron over file://)
+  // never provide `httpServer`, and the plugin still works without browserUrl.
+  if (audioRoute) {
+    ctx.inject(['httpServer'], (webCtx) => {
+      const server = (webCtx as unknown as { httpServer?: HttpRouteRegistrar })
+        .httpServer
+      if (!server) return
+      webCtx.effect(() => audioRoute.register(server))
+    })
+  }
+
+  for (const tool of createTtsTools(resolved, { audioRoute })) {
     ctx.tools.register(tool)
   }
 }

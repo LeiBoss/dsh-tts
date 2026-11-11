@@ -17,6 +17,30 @@ export const DEFAULT_EDGE_TTS_BINARY = 'edge-tts'
 /** Subdirectory of `DSH_HOME` that owns every generated audio file. */
 export const OUTPUT_SUBDIR = 'tts-output'
 
+/** Target characters per chunk, and the one-shot threshold. */
+export const DEFAULT_CHUNK_SIZE = 1_200
+
+/** Long texts are chunked by default. */
+export const DEFAULT_CHUNKING_ENABLED = true
+
+/** Engines the fallback chain understands, in default priority order. */
+export const DEFAULT_FALLBACK_ORDER = [
+  'edge-tts',
+  'sapi',
+  'speechSynthesis',
+] as const
+
+/** Fallback is enabled unless configured otherwise. */
+export const DEFAULT_FALLBACK_ENABLED = true
+
+/** One engine in the fallback chain. */
+export type TtsEngine = (typeof DEFAULT_FALLBACK_ORDER)[number]
+
+/** Narrow an arbitrary config string to a known engine. */
+export function isTtsEngine(value: string): value is TtsEngine {
+  return (DEFAULT_FALLBACK_ORDER as readonly string[]).includes(value)
+}
+
 /**
  * Config schema exposed to the DSH configuration layer. Defaults live here (not
  * in call sites) so the settings surface and runtime behaviour agree.
@@ -26,6 +50,10 @@ export const Config = z.object({
   defaultVoice: z.string().default(DEFAULT_VOICE),
   timeoutMs: z.number().default(DEFAULT_TIMEOUT_MS),
   edgeTtsBinary: z.string().default(DEFAULT_EDGE_TTS_BINARY),
+  chunkSize: z.number().default(DEFAULT_CHUNK_SIZE),
+  chunkingEnabled: z.boolean().default(DEFAULT_CHUNKING_ENABLED),
+  fallbackEnabled: z.boolean().default(DEFAULT_FALLBACK_ENABLED),
+  fallbackOrder: z.array(z.string()).default([...DEFAULT_FALLBACK_ORDER]),
 })
 
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
@@ -34,6 +62,10 @@ export interface TtsConfig {
   defaultVoice?: string
   timeoutMs?: number
   edgeTtsBinary?: string
+  chunkSize?: number
+  chunkingEnabled?: boolean
+  fallbackEnabled?: boolean
+  fallbackOrder?: string[]
 }
 
 /** Effective, path-resolved plugin settings. */
@@ -45,6 +77,11 @@ export interface ResolvedConfig {
   defaultVoice: string
   timeoutMs: number
   edgeTtsBinary: string
+  chunkSize: number
+  chunkingEnabled: boolean
+  fallbackEnabled: boolean
+  /** Unknown engine names are dropped; order is preserved. */
+  fallbackOrder: TtsEngine[]
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -75,6 +112,13 @@ export function resolveConfig(
     defaultVoice: nonEmpty(raw?.defaultVoice) ?? DEFAULT_VOICE,
     timeoutMs: raw?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     edgeTtsBinary: nonEmpty(raw?.edgeTtsBinary) ?? DEFAULT_EDGE_TTS_BINARY,
+    chunkSize: raw?.chunkSize ?? DEFAULT_CHUNK_SIZE,
+    chunkingEnabled: raw?.chunkingEnabled ?? DEFAULT_CHUNKING_ENABLED,
+    fallbackEnabled: raw?.fallbackEnabled ?? DEFAULT_FALLBACK_ENABLED,
+    fallbackOrder:
+      raw?.fallbackOrder === undefined
+        ? [...DEFAULT_FALLBACK_ORDER]
+        : raw.fallbackOrder.filter(isTtsEngine),
   }
 }
 
@@ -85,6 +129,10 @@ export function resolveConfig(
 export function requireSynthesisConfig(config: ResolvedConfig): {
   outputDir: string
   timeoutMs: number
+  chunkSize: number
+  chunkingEnabled: boolean
+  fallbackEnabled: boolean
+  fallbackOrder: TtsEngine[]
 } {
   if (!config.outputDir) {
     throw new TtsError(
@@ -100,5 +148,22 @@ export function requireSynthesisConfig(config: ResolvedConfig): {
       'Set `timeoutMs` to a positive millisecond value (default 30000).',
     )
   }
-  return { outputDir: config.outputDir, timeoutMs: config.timeoutMs }
+  if (
+    config.chunkingEnabled &&
+    (!Number.isInteger(config.chunkSize) || config.chunkSize <= 0)
+  ) {
+    throw new TtsError(
+      ErrorCode.InvalidConfig,
+      `Invalid config: chunkSize must be a positive integer, got ${JSON.stringify(config.chunkSize)}.`,
+      'Set `chunkSize` to a positive character count (default 1200), or disable chunking.',
+    )
+  }
+  return {
+    outputDir: config.outputDir,
+    timeoutMs: config.timeoutMs,
+    chunkSize: config.chunkSize,
+    chunkingEnabled: config.chunkingEnabled,
+    fallbackEnabled: config.fallbackEnabled,
+    fallbackOrder: config.fallbackOrder,
+  }
 }
