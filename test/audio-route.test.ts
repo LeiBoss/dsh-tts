@@ -358,3 +358,127 @@ test('the signing secret persists across route instances', async () => {
   }
 })
 
+function firstText(blocks: unknown): string {
+  const list = blocks as Array<{ type: string; text?: string }>
+  const block = list[0]
+  assert.ok(block)
+  return block.text ?? ''
+}
+
+test('render links an absolute playback URL once the host advertises an origin', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
+  try {
+    const route = new AudioRoute({ outputDir: dir })
+    route.register(new FakeServer())
+    route.setOrigin('http://127.0.0.1:3080/')
+
+    const config = resolveConfig({ outputDir: dir }, {})
+    const [generate] = createTtsTools(config, {
+      spawnImpl: successfulSpawn([]),
+      audioRoute: route,
+    })
+    assert.ok(generate)
+
+    const result = await generate.execute({ text: 'clickable' }, executionContext())
+    const rendered = firstText(
+      generate.output.render({ text: 'clickable' }, result),
+    )
+
+    assert.match(
+      rendered,
+      /\[▶ 播放\]\(http:\/\/127\.0\.0\.1:3080\/dsh-tts\/audio\//,
+    )
+    assert.equal(rendered.includes('Playback URL:'), false)
+    // The JSON contract stays relative even though the human output is absolute.
+    assert.ok(result.browserUrl?.startsWith(`${AUDIO_ROUTE_PREFIX}/`))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('render keeps the relative Playback URL when no origin is known', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
+  try {
+    const route = new AudioRoute({ outputDir: dir })
+    route.register(new FakeServer())
+
+    const config = resolveConfig({ outputDir: dir }, {})
+    const [generate] = createTtsTools(config, {
+      spawnImpl: successfulSpawn([]),
+      audioRoute: route,
+    })
+    assert.ok(generate)
+
+    const result = await generate.execute({ text: 'relative' }, executionContext())
+    const rendered = firstText(
+      generate.output.render({ text: 'relative' }, result),
+    )
+
+    assert.match(rendered, /Playback URL: \/dsh-tts\/audio\//)
+    assert.equal(rendered.includes('http://'), false)
+    assert.ok(result.browserUrl?.startsWith(`${AUDIO_ROUTE_PREFIX}/`))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('apply reads webServer.getOrigin and ignores a throwing getOrigin', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
+  try {
+    const filePath = join(dir, '2026-11-11', 'abcdef0123456789-1.mp3')
+    const value = {
+      filePath,
+      format: 'mp3',
+      browserUrl: '/dsh-tts/audio/token',
+    }
+
+    const makeCtx = (getOrigin: () => string) => {
+      const tools: Array<{
+        output: {
+          render: (args: unknown, rendered: unknown) => unknown
+        }
+      }> = []
+      const server = {
+        host: '127.0.0.1',
+        port: 3080,
+        getOrigin,
+        register() {
+          return () => {}
+        },
+      }
+      const ctx = {
+        tools: { register(tool: never) { tools.push(tool) } },
+        get(name: string) {
+          return name === 'webServer' ? server : undefined
+        },
+        effect(install: () => () => void) {
+          install()
+        },
+        inject() {},
+      }
+      return { tools, ctx }
+    }
+
+    const advertised = makeCtx(() => 'http://127.0.0.1:3080/')
+    apply(advertised.ctx as never, { outputDir: dir })
+    const linked = advertised.tools[0]
+    assert.ok(linked)
+    assert.match(
+      firstText(linked.output.render({ text: 'x' }, value)),
+      /\[▶ 播放\]\(http:\/\/127\.0\.0\.1:3080\/dsh-tts\/audio\//,
+    )
+
+    const throwing = makeCtx(() => {
+      throw new Error('listener not bound yet')
+    })
+    apply(throwing.ctx as never, { outputDir: dir })
+    const relative = throwing.tools[0]
+    assert.ok(relative)
+    const rendered = firstText(relative.output.render({ text: 'x' }, value))
+    assert.match(rendered, /Playback URL: \/dsh-tts\/audio\/token/)
+    assert.equal(rendered.includes('http://'), false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+

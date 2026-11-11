@@ -33,6 +33,7 @@ npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与
 | `ctx.get('connection')` | 读取 `allowsRemoteAuthorities`，远程访问时放宽 Host 校验 |
 | DSH 配置层（`Config` + `apply` 的 config） | 读取 13 项配置；插件不自行读写 `cordis.patch.yml` |
 | `child_process.spawn` | 调用 `edge-tts`；降级时调用 `powershell.exe` 与 `ffmpeg` |
+| `node:child_process` / `node:fs` | 直接调用 CLI 并写文件，不经 `ctx.subprocess` / 文件服务；见「能力接缝与沙箱」 |
 | 文件系统 | 写入 `$DSH_HOME/tts-output/<YYYY-MM-DD>/<hash>-<timestamp>.mp3` |
 
 一次请求的路径：参数校验 → 缓存查找（命中直接返回）→ 同 key 在途请求合并 → 并发槽位 → 分块或一次性合成 → 失败时降级 → 落盘 → 生成签名播放 URL。
@@ -153,6 +154,8 @@ npm run build
 
 `browserUrl` 是同源相对地址，可在浏览器地址栏直接打开播放；它带有效期与签名。签名密钥持久化在输出目录的 `.audio-route-secret`，插件重载后旧链接仍可用；删除该文件会轮换全部链接。
 
+DSH Web 中，工具结果的 `render` 会在拿到宿主 `webServer.getOrigin()` 时把 `browserUrl` 拼成绝对地址，渲染为可点击的「▶ 播放」链接；JSON 返回值里的 `browserUrl` 仍是相对路径。拿不到 origin（例如 headless 或 `file://`）时不猜 `localhost`，退回相对 `Playback URL` 文本。
+
 当所有宿主引擎都不可用时，返回：
 
 ```json
@@ -203,6 +206,19 @@ npm run test:integration
 - DSH Web 中的 `browserUrl` 播放与进度条拖动（本仓库无宿主环境）。
 - Windows 上的 SAPI 降级（需要 `powershell.exe` 与 `ffmpeg`）。
 
+## 能力接缝与沙箱
+
+插件用 `node:child_process.spawn` 调用 `edge-tts`（降级时 `powershell.exe`、`ffmpeg`），用 `node:fs` 直接读写输出目录，不经过 `ctx.subprocess` 与宿主文件服务。TTS 是一次性 sidecar CLI，直连让行为在 Web / headless / Electron(`file://`) 下一致，也不把可执行文件解析、终端环境等宿主细节耦合进插件。
+
+代价是沙箱策略按进程级生效，错误必须按来源区分：
+
+| 错误码 | 含义 | 修法 |
+| --- | --- | --- |
+| `SPAWN_EPERM` | 创建子进程被策略拒绝，不是文件不可写 | 调整 DSH 沙箱的进程策略 |
+| `OUTPUT_DIR_NOT_WRITABLE` | 子进程正常，但写文件被拒绝 | 检查输出目录权限与文件策略 |
+
+两者混为一谈会让人去改错的地方，这是最常见的误判。文件权限跟随 Host 进程用户；输出目录默认 `$DSH_HOME/tts-output`，未设置时回退 `~/.dsh/tts-output`。
+
 ## 已知限制
 
 - **需要联网访问 Edge-TTS**：离线时子进程超时或非零退出。缓解：配置 `fallbackEnabled` 与 `fallbackOrder`，Windows 可降级到 SAPI。
@@ -210,7 +226,7 @@ npm run test:integration
 - **沙箱可能拒绝子进程**：报 `SPAWN_EPERM`，这是进程创建被策略拦截，不是文件不可写。缓解：调整 DSH 沙箱进程策略，或接受 `speechSynthesis` 标记由客户端朗读。
 - **`pitch`/`volume` 不参与缓存键**：相同文本、音色、语速的第二次调用会返回首次生成的文件，即使本次指定了不同的 pitch/volume。缓解：更换 `voice` 或 `rate`，或手动删除对应缓存文件。
 - **非 Windows 没有 SAPI 降级**：Linux/macOS 上会跳过 SAPI。缓解：保证 Edge-TTS 可用，或将 `speechSynthesis` 保留在降级链中。
-- **客户端播放入口缺失**：当前只返回 `browserUrl`，需要用户在浏览器中打开，没有内联 `<audio>` 控件。缓解：后续迭代再提供客户端播放器。
+- **客户端播放入口缺失**：当前只返回 `browserUrl`，DSH Web 中可直接点击工具结果里的「▶ 播放」链接；宿主没有提供 origin 时仍需自行打开相对地址。缓解：后续迭代再提供内联 `<audio>` 播放器。
 - **来源校验交给宿主**：路由优先调用 `ctx.connection.requestRejection`（Host/Origin 与浏览器认证），失败时 401/403。为保留“链接可外发”，插件不接 `admit`，因此不带 DSH 会话 cookie 的 `curl` 直连会被拒绝；需要命令行验证时请从浏览器携带 Cookie。旧宿主没有 `connection` 时回退为内置 Host 端口 + `Origin`/`Host` 同源校验，并保留签名 token 作为第二道防线。
 - **反向代理需要 `trustedHosts`**：代理常改端口，配置 `trustedHosts` 后跳过端口钉死；留空则要求 Host 端口与监听端口一致。
 - **签名密钥可轮换**：密钥存于 `<outputDir>/.audio-route-secret`，删除即让已发出的全部链接失效；文件读取/写入失败时回退内存密钥并只影响本次进程。
@@ -228,9 +244,9 @@ npm run test:integration
 | `INVALID_VOLUME` | `volume` 不是 `+N%` / `-N%`（1–3 位数字） | 使用 `+0%`、`-20%` 这类值 |
 | `INVALID_CONFIG` | 配置值非法（如 `timeoutMs`、`totalTimeoutMs`、`chunkSize`、`maxConcurrent`、`queueSize`） | 按默认值范围修正配置 |
 | `DSH_HOME_NOT_SET` | 未设置 `DSH_HOME` 且未配置 `outputDir` | 设置 `DSH_HOME` 或 `outputDir` |
-| `OUTPUT_DIR_NOT_WRITABLE` | 输出目录无法写入 | 检查沙箱文件策略与目录权限 |
+| `OUTPUT_DIR_NOT_WRITABLE` | 输出目录无法写入（参见「能力接缝与沙箱」） | 检查沙箱文件策略与目录权限 |
 | `EDGE_TTS_NOT_FOUND` | 找不到 `edge-tts` | `pip install edge-tts` 或设置 `edgeTtsBinary` |
-| `SPAWN_EPERM` | 沙箱拒绝创建子进程 | 调整 DSH 沙箱进程策略，不是文件权限问题 |
+| `SPAWN_EPERM` | 沙箱拒绝创建子进程（参见「能力接缝与沙箱」） | 调整 DSH 沙箱进程策略，不是文件权限问题 |
 | `SPAWN_FAILED` | 其他子进程创建失败 | 检查 `edgeTtsBinary` 是否可执行 |
 | `EDGE_TTS_FAILED` | Edge-TTS 非零退出 | 查看错误中的退出码与 stderr，检查网络与音色 |
 | `SYNTHESIS_TIMEOUT` | 单个子进程超过 `timeoutMs`，或整次调用超过 `totalTimeoutMs` | 增大对应超时、缩短文本或检查网络 |

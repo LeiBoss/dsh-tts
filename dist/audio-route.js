@@ -132,6 +132,7 @@ export class AudioRoute {
     expectedPort;
     skipPortCheck = false;
     active = false;
+    origin;
     constructor(options) {
         this.root = resolve(options.outputDir);
         this.ttlMs = options.ttlMs ?? DEFAULT_URL_TTL_MS;
@@ -199,6 +200,23 @@ export class AudioRoute {
         const encoded = Buffer.from(relativePath, 'utf8').toString('base64url');
         const payload = `${expires}.${encoded}`;
         return `${AUDIO_ROUTE_PREFIX}/${payload}.${this.sign(payload)}`;
+    }
+    /** Remember the host-advertised origin, trimmed of any trailing slash. */
+    setOrigin(origin) {
+        const trimmed = origin.trim().replace(/\/+$/, '');
+        if (trimmed.length > 0)
+            this.origin = trimmed;
+    }
+    /**
+     * Absolute playback URL for humans, or `undefined` when the host did not
+     * advertise an origin. Never guesses a host: callers fall back to the
+     * relative {@link urlFor} result instead.
+     */
+    absoluteUrlFor(filePath) {
+        const relative = this.urlFor(filePath);
+        if (relative === undefined || this.origin === undefined)
+            return undefined;
+        return `${this.origin}${relative}`;
     }
     /** Serve one request. Exported behaviour is exercised directly by tests. */
     async handle(req, res) {

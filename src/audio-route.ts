@@ -64,6 +64,8 @@ export const SECRET_FILE_NAME = '.audio-route-secret'
 /** Resolves a local audio path to a browser-openable URL, when routable. */
 export interface AudioUrlProvider {
   urlFor(filePath: string): string | undefined
+  /** Absolute URL for human-readable output; absent host origin yields `undefined`. */
+  absoluteUrlFor?(filePath: string): string | undefined
 }
 
 export interface AudioRouteOptions {
@@ -220,6 +222,7 @@ export class AudioRoute implements AudioUrlProvider {
   private expectedPort?: number
   private skipPortCheck = false
   private active = false
+  private origin?: string
 
   constructor(options: AudioRouteOptions) {
     this.root = resolve(options.outputDir)
@@ -293,6 +296,23 @@ export class AudioRoute implements AudioUrlProvider {
     const encoded = Buffer.from(relativePath, 'utf8').toString('base64url')
     const payload = `${expires}.${encoded}`
     return `${AUDIO_ROUTE_PREFIX}/${payload}.${this.sign(payload)}`
+  }
+
+  /** Remember the host-advertised origin, trimmed of any trailing slash. */
+  setOrigin(origin: string): void {
+    const trimmed = origin.trim().replace(/\/+$/, '')
+    if (trimmed.length > 0) this.origin = trimmed
+  }
+
+  /**
+   * Absolute playback URL for humans, or `undefined` when the host did not
+   * advertise an origin. Never guesses a host: callers fall back to the
+   * relative {@link urlFor} result instead.
+   */
+  absoluteUrlFor(filePath: string): string | undefined {
+    const relative = this.urlFor(filePath)
+    if (relative === undefined || this.origin === undefined) return undefined
+    return `${this.origin}${relative}`
   }
 
   /** Serve one request. Exported behaviour is exercised directly by tests. */

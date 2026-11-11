@@ -37,6 +37,8 @@ export declare const SECRET_FILE_NAME = ".audio-route-secret";
 /** Resolves a local audio path to a browser-openable URL, when routable. */
 export interface AudioUrlProvider {
     urlFor(filePath: string): string | undefined;
+    /** Absolute URL for human-readable output; absent host origin yields `undefined`. */
+    absoluteUrlFor?(filePath: string): string | undefined;
 }
 export interface AudioRouteOptions {
     /** Ledger root; tokens may only name files beneath it. */
@@ -76,6 +78,7 @@ export declare class AudioRoute implements AudioUrlProvider {
     private expectedPort?;
     private skipPortCheck;
     private active;
+    private origin?;
     constructor(options: AudioRouteOptions);
     /** True once the host router accepted the route. */
     get registered(): boolean;
@@ -86,6 +89,14 @@ export declare class AudioRoute implements AudioUrlProvider {
      * registered or the file is outside the output directory / not an MP3.
      */
     urlFor(filePath: string): string | undefined;
+    /** Remember the host-advertised origin, trimmed of any trailing slash. */
+    setOrigin(origin: string): void;
+    /**
+     * Absolute playback URL for humans, or `undefined` when the host did not
+     * advertise an origin. Never guesses a host: callers fall back to the
+     * relative {@link urlFor} result instead.
+     */
+    absoluteUrlFor(filePath: string): string | undefined;
     /** Serve one request. Exported behaviour is exercised directly by tests. */
     handle(req: IncomingMessage, res: ServerResponse): Promise<void>;
     /** HMAC-SHA-256 over the payload, base64url-encoded. */
