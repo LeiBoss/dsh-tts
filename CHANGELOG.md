@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-11
+
+### Added
+
+- Inline client player: `tts_generate` results render a native `<audio controls>` in DSH Web.
+- `tts_probe_network` tool for TCP reachability checks against the Edge-TTS endpoint.
+- `proxy` config forwarded to Edge-TTS as `--proxy`; `tts_self_check` reports `proxyConfigured`.
+- `fallbackReason` reporting the engine chain when synthesis falls back to `speechSynthesis`.
+
+### Fixed
+
+- SAPI fallback wrote to `*.mp3.partial`, so ffmpeg could not infer the container and the chain
+  always fell through to `speechSynthesis`; the partial file now ends in `.mp3`.
+- Corrected README claims about link shareability and playback rendering.
+
 ## [0.2.0] - 2026-11-11
 
 ### Added
@@ -55,4 +70,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rotates every previously issued link.
 - Route requests prefer the host's Host/Origin and browser authentication checks.
 
+[0.2.1]: https://github.com/leiboss/dsh-tts/releases/tag/v0.2.1
 [0.2.0]: https://github.com/leiboss/dsh-tts/releases/tag/v0.2.0
