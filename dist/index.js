@@ -7,6 +7,7 @@ import { synthesize, } from "./edge-tts.js";
 import { ErrorCode, TtsError } from "./errors.js";
 import { isFallbackEligible, runFallback } from "./fallback.js";
 import { selfCheck } from "./self-check.js";
+import { AVAILABLE_VOICES } from "./voices.js";
 export { Config } from "./config.js";
 export { ErrorCode, TtsError } from "./errors.js";
 export { cacheKey, findCachedFile } from "./cache.js";
@@ -17,6 +18,7 @@ export { DEFAULT_CHUNK_SIZE, splitText } from "./chunker.js";
 export { synthesizeChunked } from "./chunked-tts.js";
 export { isFallbackEligible, runFallback } from "./fallback.js";
 export { isSapiSupported, sapiRate, synthesizeSapi } from "./sapi-tts.js";
+export { AVAILABLE_VOICES, VOICES } from "./voices.js";
 export const name = 'dsh-tts';
 /** The registry must exist before `apply` runs. */
 export const inject = ['tools'];
@@ -27,6 +29,10 @@ export const inject = ['tools'];
 const VOICE_PATTERN = /^[a-z]{2,3}-[A-Z]{2,3}(?:-[a-z0-9]+)?-[A-Za-z0-9]+Neural$/;
 /** Edge-TTS rates are signed percentages such as `+0%` or `-10%`. */
 const RATE_PATTERN = /^[+-]\d{1,3}%$/;
+/** Pitch Edge-TTS uses when the call omits one. */
+export const DEFAULT_PITCH = '+0Hz';
+/** Volume Edge-TTS uses when the call omits one. */
+export const DEFAULT_VOLUME = '+0%';
 /**
  * Canonical tool value. Only the fields declared in `output.schema` may
  * appear; `browserUrl` is omitted when the host offers no web route and
@@ -93,6 +99,14 @@ export function createTtsTools(config, deps = {}) {
                 type: 'string',
                 description: `Speech rate as a signed percentage, for example +0% or -10%. Defaults to ${DEFAULT_RATE}.`,
             },
+            pitch: {
+                type: 'string',
+                description: `Pitch adjustment as a signed frequency, for example +10Hz or -20Hz. Defaults to ${DEFAULT_PITCH}.`,
+            },
+            volume: {
+                type: 'string',
+                description: `Volume adjustment as a signed percentage, for example +20% or -10%. Defaults to ${DEFAULT_VOLUME}.`,
+            },
         },
         output: {
             schema: {
@@ -145,6 +159,8 @@ export function createTtsTools(config, deps = {}) {
             requireVoice(voice);
             const rate = args.rate?.trim() || DEFAULT_RATE;
             requireRate(rate);
+            const pitch = args.pitch?.trim() || DEFAULT_PITCH;
+            const volume = args.volume?.trim() || DEFAULT_VOLUME;
             const { outputDir, timeoutMs, chunkSize, chunkingEnabled, fallbackEnabled, fallbackOrder, } = requireSynthesisConfig(config);
             const hash = cacheKey(text, voice, rate);
             const cached = await findCachedFile(outputDir, hash);
@@ -155,6 +171,8 @@ export function createTtsTools(config, deps = {}) {
                 ? await synthesizeChunked(text, {
                     voice,
                     rate,
+                    pitch,
+                    volume,
                     binary: config.edgeTtsBinary,
                     outputDir,
                     hash,
@@ -168,6 +186,8 @@ export function createTtsTools(config, deps = {}) {
                 : await synthesize(text, {
                     voice,
                     rate,
+                    pitch,
+                    volume,
                     binary: config.edgeTtsBinary,
                     outputDir,
                     hash,
@@ -246,6 +266,12 @@ export function createTtsTools(config, deps = {}) {
                         required: true,
                         description: 'Value of DSH_HOME, or an empty string when unset.',
                     },
+                    availableVoices: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        required: true,
+                        description: 'Static list of documented voice names; no network query is performed.',
+                    },
                 },
                 additionalProperties: false,
             },
@@ -254,11 +280,12 @@ export function createTtsTools(config, deps = {}) {
             ],
         },
         async execute(_args, exec) {
-            return selfCheck({
+            const result = await selfCheck({
                 config,
                 signal: exec.signal,
                 spawnImpl: deps.spawnImpl,
             });
+            return { ...result, availableVoices: [...AVAILABLE_VOICES] };
         },
     });
     return [generate, check];

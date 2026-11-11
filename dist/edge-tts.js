@@ -118,6 +118,8 @@ export async function synthesize(text, options) {
         `--text=${text}`,
         `--voice=${options.voice}`,
         `--rate=${options.rate}`,
+        ...(options.pitch === undefined ? [] : [`--pitch=${options.pitch}`]),
+        ...(options.volume === undefined ? [] : [`--volume=${options.volume}`]),
         `--write-media=${partialPath}`,
     ];
     try {
