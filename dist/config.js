@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import z from '@deepseek-ai/schemastery';
+import { DEFAULT_ENGINE_HEALTH, } from "./engine-health.js";
 import { ErrorCode, TtsError } from "./errors.js";
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
 export const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural';
@@ -57,10 +58,32 @@ export const Config = z.object({
     totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
     trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
     proxy: z.string(),
+    engineHealth: z
+        .object({
+        enabled: z.boolean().default(DEFAULT_ENGINE_HEALTH.enabled),
+        failureThreshold: z
+            .number()
+            .default(DEFAULT_ENGINE_HEALTH.failureThreshold),
+        driftCooldownMs: z.number().default(DEFAULT_ENGINE_HEALTH.driftCooldownMs),
+        transientCooldownMs: z
+            .number()
+            .default(DEFAULT_ENGINE_HEALTH.transientCooldownMs),
+        maxCooldownMs: z.number().default(DEFAULT_ENGINE_HEALTH.maxCooldownMs),
+    })
+        .default({ ...DEFAULT_ENGINE_HEALTH }),
 });
 function nonEmpty(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
+}
+function resolveEngineHealth(raw) {
+    return {
+        enabled: raw?.enabled ?? DEFAULT_ENGINE_HEALTH.enabled,
+        failureThreshold: raw?.failureThreshold ?? DEFAULT_ENGINE_HEALTH.failureThreshold,
+        driftCooldownMs: raw?.driftCooldownMs ?? DEFAULT_ENGINE_HEALTH.driftCooldownMs,
+        transientCooldownMs: raw?.transientCooldownMs ?? DEFAULT_ENGINE_HEALTH.transientCooldownMs,
+        maxCooldownMs: raw?.maxCooldownMs ?? DEFAULT_ENGINE_HEALTH.maxCooldownMs,
+    };
 }
 /**
  * Resolve config defaults without touching the filesystem. A missing
@@ -95,6 +118,7 @@ export function resolveConfig(raw, env = process.env) {
             .map((host) => host.trim().toLowerCase())
             .filter((host) => host.length > 0),
         proxy: nonEmpty(raw?.proxy),
+        engineHealth: resolveEngineHealth(raw?.engineHealth),
     };
 }
 /**
@@ -125,6 +149,19 @@ export function requireSynthesisConfig(config) {
     if (!Number.isFinite(config.totalTimeoutMs) || config.totalTimeoutMs <= 0) {
         throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: totalTimeoutMs must be a positive number, got ${JSON.stringify(config.totalTimeoutMs)}.`, 'Set `totalTimeoutMs` to a positive millisecond value (default 180000).');
     }
+    const health = config.engineHealth;
+    if (!Number.isInteger(health.failureThreshold) || health.failureThreshold < 1) {
+        throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: engineHealth.failureThreshold must be a positive integer, got ${JSON.stringify(health.failureThreshold)}.`, 'Set `engineHealth.failureThreshold` to at least 1 (default 3).');
+    }
+    for (const [field, value] of [
+        ['driftCooldownMs', health.driftCooldownMs],
+        ['transientCooldownMs', health.transientCooldownMs],
+        ['maxCooldownMs', health.maxCooldownMs],
+    ]) {
+        if (!Number.isFinite(value) || value <= 0) {
+            throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: engineHealth.${field} must be a positive number, got ${JSON.stringify(value)}.`, `Set \`engineHealth.${field}\` to a positive millisecond value.`);
+        }
+    }
     return {
         outputDir: config.outputDir,
         timeoutMs: config.timeoutMs,
@@ -138,6 +175,7 @@ export function requireSynthesisConfig(config) {
         totalTimeoutMs: config.totalTimeoutMs,
         trustedHosts: config.trustedHosts,
         proxy: config.proxy,
+        engineHealth: health,
     };
 }
 //# sourceMappingURL=config.js.map

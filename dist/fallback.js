@@ -13,6 +13,8 @@ const FALLBACK_ELIGIBLE = new Set([
 export function isFallbackEligible(error) {
     return error instanceof TtsError && FALLBACK_ELIGIBLE.has(error.code);
 }
+/** Reason recorded when the health circuit skips an engine. */
+export const SKIPPED_BY_HEALTH = 'skipped: circuit open (cooldown)';
 function describe(error) {
     if (error instanceof TtsError)
         return `${error.code}: ${error.detail}`;
@@ -34,7 +36,8 @@ export async function runFallback(options, deps = {}) {
     const attempts = [
         {
             engine: 'edge-tts',
-            reason: `primary engine failed: ${describe(options.primaryError)}`,
+            reason: options.primaryReason ??
+                `primary engine failed: ${describe(options.primaryError)}`,
         },
     ];
     // Local array narrowing keeps the literal union readable in the loop.
@@ -42,6 +45,10 @@ export async function runFallback(options, deps = {}) {
     for (const engine of order) {
         if (engine === 'edge-tts')
             continue;
+        if (options.skip?.has(engine)) {
+            attempts.push({ engine, reason: SKIPPED_BY_HEALTH });
+            continue;
+        }
         if (engine === 'sapi') {
             if (!isSapiSupported(platform)) {
                 attempts.push({ engine, reason: `skipped: SAPI is Windows-only (${platform})` });
@@ -60,12 +67,15 @@ export async function runFallback(options, deps = {}) {
                     powershellBinary: deps.powershellBinary,
                     ffmpegBinary: deps.ffmpegBinary,
                 });
+                const engineState = deps.health?.stateOf(engine) ?? 'healthy';
+                deps.health?.recordSuccess(engine);
                 attempts.push({ engine, reason: 'succeeded' });
-                return { kind: 'audio', audio, engine, attempts };
+                return { kind: 'audio', audio, engine, engineState, attempts };
             }
             catch (error) {
                 if (error instanceof TtsError && error.code === ErrorCode.Aborted)
                     throw error;
+                deps.health?.recordFailure(engine, error);
                 attempts.push({ engine, reason: describe(error) });
                 continue;
             }

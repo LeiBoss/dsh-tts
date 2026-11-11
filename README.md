@@ -1,7 +1,8 @@
 # dsh-tts
 
-npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与本项目无关。
+npm 包名为 `@leiboss/dsh-tts`。
 
+[![npm](https://img.shields.io/npm/v/@leiboss/dsh-tts.svg)](https://www.npmjs.com/package/@leiboss/dsh-tts)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![CI](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml/badge.svg)](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml)
 
@@ -53,6 +54,7 @@ end users. The following behaviors are part of its contract:
 | Sandbox rejection | `spawn` blocked by the sandbox is distinguished from upstream failure | `SPAWN_EPERM` (points to sandbox policy, not filesystem) |
 | Upstream failure | Edge-TTS non-zero exit or network timeout | `EDGE_TTS_FAILED` / `SYNTHESIS_TIMEOUT` |
 | Fallback | On Edge-TTS failure, tries engines in `fallbackOrder`; the response marks the engine actually used | `engine` / `fallback` fields |
+| Engine health | Unhealthy engines are skipped during cooldown; a half-open probe recovers them on success. Protocol drift (403 / handshake rejection) opens the circuit with a longer cooldown than transient failures. | `engineHealth` in `tts_self_check` and `tts_generate` |
 | Cache semantics | Cache key is fixed to `(text, voice, rate)`; `pitch`/`volume` are excluded for predictable cache behavior | See “Known limitations” |
 | Lifecycle | Tools, routes, and config listeners are effect-registered and cleaned up on dispose; HMR-safe | — |
 
@@ -88,8 +90,6 @@ dsh plugin --profile web add @leiboss/dsh-tts        # 发布后
 dsh plugin --profile web add github:leiboss/dsh-tts  # 发布前/备用
 ```
 
-> 警告：npm 上的裸名 `dsh-tts` 属于其他维护者，与本项目无关，请勿安装。
-
 从旧版本迁移：旧依赖目录名是 `dsh-tts`，与新的 scoped 包名不匹配，必须先移除再安装，否则会残留 `Cannot find module 'dsh-tts'` 或工具重名：
 
 ```bash
@@ -120,6 +120,46 @@ npm run build
 把“你好”合成语音
 ```
 
+## For plugin authors
+
+If you are building a reader plugin, a notification plugin, or an agent that needs
+reliable audio synthesis, you can call `tts_generate` as a tool, or depend on the
+`TTSProvider` interface directly.
+
+**Option A: call the tool** (recommended for agents)
+
+```typescript
+const result = await ctx.tools.call('tts_generate', {
+  text: 'Build completed',
+  voice: 'zh-CN-YunxiNeural',
+})
+// result: { filePath, format, browserUrl?, engine?, fallback? }
+```
+
+**Option B: import the provider** (for plugins that want to own the playback UX)
+
+```typescript
+import type { TTSProvider, SynthesizeResult } from '@leiboss/dsh-tts/provider'
+
+// Resolve a provider instance from the DSH service registry,
+// or construct the Edge-TTS provider directly if you are embedding it.
+```
+
+**Error handling contract**
+
+Treat these error codes differently — the distinction is the point:
+
+| Code | Meaning | Recommended handling |
+|---|---|---|
+| `TTS_BUSY` | Concurrency limit or queue full | Retry after a short delay |
+| `SPAWN_EPERM` | Sandbox blocked subprocess creation | Surface to user as environment issue; do not retry |
+| `EDGE_TTS_FAILED` | Upstream Edge-TTS failure | Trigger your own fallback, or rely on this plugin's fallback chain |
+| `SYNTHESIS_TIMEOUT` | Synthesis exceeded timeout | Retry with shorter text or larger `timeoutMs` |
+| `ALL_FALLBACKS_FAILED` | All engines in `fallbackOrder` failed | Surface to user; do not retry without environment change |
+
+Do not treat all errors as equivalent. A caller that retries `SPAWN_EPERM` will
+loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessarily.
+
 ## 配置
 
 所有配置都通过 DSH 配置层覆盖，不在工具参数里传入。
@@ -140,6 +180,11 @@ npm run build
 | `totalTimeoutMs` | `180000` | 一次 `tts_generate` 的总预算，覆盖所有分块与块间延迟 | 插件 config 的 `totalTimeoutMs` |
 | `trustedHosts` | `[]` | 反向代理场景的额外 Host 白名单；非空时跳过端口钉死 | 插件 config 的 `trustedHosts` |
 | `proxy` | `undefined` | 为 Edge-TTS 子进程配置 HTTP 代理，透传为 `--proxy`；留空则不追加参数 | 插件 config 的 `proxy` |
+| `engineHealth.enabled` | `true` | 是否启用引擎健康状态机；关闭后每个引擎总是被尝试 | 插件 config 的 `engineHealth.enabled` |
+| `engineHealth.failureThreshold` | `3` | 连续普通失败达到该次数后打开熔断 | 插件 config 的 `engineHealth.failureThreshold` |
+| `engineHealth.driftCooldownMs` | `300000` | 协议漂移（403 / 握手失败）触发的冷却期 | 插件 config 的 `engineHealth.driftCooldownMs` |
+| `engineHealth.transientCooldownMs` | `60000` | 普通失败达到阈值后触发的冷却期 | 插件 config 的 `engineHealth.transientCooldownMs` |
+| `engineHealth.maxCooldownMs` | `600000` | 半开探测失败后冷却时长翻倍的上限 | 插件 config 的 `engineHealth.maxCooldownMs` |
 
 ## 使用
 
@@ -212,46 +257,6 @@ DSH Web 中，本插件还声明了客户端入口（`dsh.client`，`exports["./
 | `en-US-GuyNeural` | 男 | 英文（美式） | 英文男声 |
 | `en-US-JennyNeural` | 女 | 英文（美式） | 对话感英文女声 |
 
-## For plugin authors
-
-If you are building a reader plugin, a notification plugin, or an agent that needs
-reliable audio synthesis, you can call `tts_generate` as a tool, or depend on the
-`TTSProvider` interface directly.
-
-**Option A: call the tool** (recommended for agents)
-
-```typescript
-const result = await ctx.tools.call('tts_generate', {
-  text: 'Build completed',
-  voice: 'zh-CN-YunxiNeural',
-})
-// result: { filePath, format, browserUrl?, engine?, fallback? }
-```
-
-**Option B: import the provider** (for plugins that want to own the playback UX)
-
-```typescript
-import type { TTSProvider, SynthesizeResult } from '@leiboss/dsh-tts/provider'
-
-// Resolve a provider instance from the DSH service registry,
-// or construct the Edge-TTS provider directly if you are embedding it.
-```
-
-**Error handling contract**
-
-Treat these error codes differently — the distinction is the point:
-
-| Code | Meaning | Recommended handling |
-|---|---|---|
-| `TTS_BUSY` | Concurrency limit or queue full | Retry after a short delay |
-| `SPAWN_EPERM` | Sandbox blocked subprocess creation | Surface to user as environment issue; do not retry |
-| `EDGE_TTS_FAILED` | Upstream Edge-TTS failure | Trigger your own fallback, or rely on this plugin's fallback chain |
-| `SYNTHESIS_TIMEOUT` | Synthesis exceeded timeout | Retry with shorter text or larger `timeoutMs` |
-| `ALL_FALLBACKS_FAILED` | All engines in `fallbackOrder` failed | Surface to user; do not retry without environment change |
-
-Do not treat all errors as equivalent. A caller that retries `SPAWN_EPERM` will
-loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessarily.
-
 ## 验证
 
 ### 已验证（Windows 11 + DSH 0.2.2-rc.1）
@@ -314,6 +319,7 @@ npm run test:integration
 - **不提供音频时长**：输出 schema 不再声明 `durationMs`，需要时长请用外部工具探测。
 - **环境变量代理对 Edge-TTS 无效**：edge-tts 的 WSS 连接不读取 `HTTPS_PROXY` / `https_proxy`，设置环境变量不会生效；必须通过本插件的 `proxy` 配置项透传 `--proxy`。
 - **端点单一，无自动迁移**：edge-tts 7.3.1 只有一个端点 `speech.platform.bing.com`。如果该端点在当前网络不可达，只能通过 `proxy` 或降级到 SAPI / `speechSynthesis`；可用 `tts_probe_network` 做一次 TCP 可达性判断。
+- **引擎健康状态仅存在于内存**：插件重启后重置为 `healthy`。它反映的是最近一次尝试的结果，不是实时探测。如需确认当前网络可达性，请使用 `tts_probe_network`。
 
 ## 错误码
 

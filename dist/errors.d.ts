@@ -24,6 +24,13 @@ export declare const ErrorCode: {
     readonly SpeechSynthesisRequired: "SPEECH_SYNTHESIS_REQUIRED";
 };
 export type TtsErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+/** Whether captured subprocess output looks like protocol drift, not jitter. */
+export declare function looksLikeProtocolDrift(text: string): boolean;
+/** Options accepted by {@link TtsError}. */
+export interface TtsErrorOptions extends ErrorOptions {
+    /** Marks a failure caused by upstream protocol drift rather than jitter. */
+    protocolDrift?: boolean;
+}
 /**
  * Structured plugin error: a routable `code`, a human-readable message, and an
  * actionable suggestion. Extends the harness error base so the tool registry
@@ -34,8 +41,16 @@ export declare class TtsError extends HarnessError {
     readonly detail: string;
     /** Action the caller (or the user) can take to resolve the failure. */
     readonly suggestion?: string;
-    constructor(code: TtsErrorCode, message: string, suggestion?: string, options?: ErrorOptions);
+    /** Set when the failure is a handshake/protocol rejection, not a timeout. */
+    readonly protocolDrift: boolean;
+    constructor(code: TtsErrorCode, message: string, suggestion?: string, options?: TtsErrorOptions);
 }
+/**
+ * Classify a failure as protocol drift. The explicit flag wins; the text
+ * fallback keeps errors re-wrapped by callers (for example per-chunk failures)
+ * classifiable without extra plumbing.
+ */
+export declare function isProtocolDrift(error: unknown): boolean;
 /** Read a Node `SystemError` code without assuming the thrown value's shape. */
 export declare function errnoCode(error: unknown): string | undefined;
 /**

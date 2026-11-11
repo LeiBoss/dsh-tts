@@ -24,6 +24,23 @@ export const ErrorCode = {
     SpeechSynthesisRequired: 'SPEECH_SYNTHESIS_REQUIRED',
 };
 /**
+ * Substrings that mean the upstream Edge-TTS protocol changed under us: a
+ * rejected WebSocket handshake, a rotated `Sec-MS-GEC` token generation, or a
+ * generic HTTP 403. These are not retryable jitter — the installed edge-tts
+ * version and the service disagree about the handshake.
+ */
+const PROTOCOL_DRIFT_PATTERNS = [
+    /403/,
+    /invalid response status/i,
+    /wsserverhandshakeerror/i,
+    /sec-ms-gec/i,
+    /handshake/i,
+];
+/** Whether captured subprocess output looks like protocol drift, not jitter. */
+export function looksLikeProtocolDrift(text) {
+    return PROTOCOL_DRIFT_PATTERNS.some((pattern) => pattern.test(text));
+}
+/**
  * Structured plugin error: a routable `code`, a human-readable message, and an
  * actionable suggestion. Extends the harness error base so the tool registry
  * can retain the code in its failure metadata.
@@ -33,12 +50,25 @@ export class TtsError extends HarnessError {
     detail;
     /** Action the caller (or the user) can take to resolve the failure. */
     suggestion;
+    /** Set when the failure is a handshake/protocol rejection, not a timeout. */
+    protocolDrift;
     constructor(code, message, suggestion, options) {
         super(suggestion ? `${message}\nSuggestion: ${suggestion}` : message, code, options);
         this.name = 'TtsError';
         this.detail = message;
         this.suggestion = suggestion;
+        this.protocolDrift = options?.protocolDrift === true;
     }
+}
+/**
+ * Classify a failure as protocol drift. The explicit flag wins; the text
+ * fallback keeps errors re-wrapped by callers (for example per-chunk failures)
+ * classifiable without extra plumbing.
+ */
+export function isProtocolDrift(error) {
+    if (!(error instanceof TtsError))
+        return false;
+    return error.protocolDrift || looksLikeProtocolDrift(error.detail);
 }
 /** Read a Node `SystemError` code without assuming the thrown value's shape. */
 export function errnoCode(error) {

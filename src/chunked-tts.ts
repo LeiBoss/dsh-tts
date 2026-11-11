@@ -58,7 +58,7 @@ function chunkFailure(index: number, total: number, error: unknown): TtsError {
       error.code as TtsErrorCode,
       `Chunk ${index + 1}/${total} failed: ${error.detail}`,
       error.suggestion,
-      { cause: error },
+      { cause: error, protocolDrift: error.protocolDrift },
     )
   }
   const detail = error instanceof Error ? error.message : String(error)

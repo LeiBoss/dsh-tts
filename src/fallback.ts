@@ -7,6 +7,7 @@
  */
 import type { TtsEngine } from './config.ts'
 import type { SpawnFunction, SynthesizedAudio } from './edge-tts.ts'
+import type { EngineHealthHooks, EngineHealthState } from './engine-health.ts'
 import { ErrorCode, TtsError, type TtsErrorCode } from './errors.ts'
 import {
   isSapiSupported,
@@ -35,12 +36,17 @@ export interface FallbackAttempt {
   reason: string
 }
 
+/** Reason recorded when the health circuit skips an engine. */
+export const SKIPPED_BY_HEALTH = 'skipped: circuit open (cooldown)'
+
 /** Either a produced file or a request for the client to speak the text. */
 export type FallbackOutcome =
   | {
       kind: 'audio'
       audio: SynthesizedAudio
       engine: TtsEngine
+      /** Health of `engine` just before this attempt succeeded. */
+      engineState: EngineHealthState
       attempts: FallbackAttempt[]
     }
   | {
@@ -60,6 +66,13 @@ export interface FallbackOptions {
   now?: Date
   /** Error thrown by the primary Edge-TTS attempt, kept for the final message. */
   primaryError?: unknown
+  /** Why the primary attempt was not made, when its circuit was open. */
+  primaryReason?: string
+  /**
+   * Engines whose circuit is open. Skipping never reorders the chain; it only
+   * removes an engine from this attempt.
+   */
+  skip?: ReadonlySet<TtsEngine>
 }
 
 /** Injection points; production uses the real Windows/ffmpeg binaries. */
@@ -72,6 +85,8 @@ export interface FallbackDependencies {
     text: string,
     options: SapiOptions,
   ) => Promise<SynthesizedAudio>
+  /** Health hooks; omitted by direct callers that do not track engines. */
+  health?: EngineHealthHooks
 }
 
 function describe(error: unknown): string {
@@ -108,7 +123,9 @@ export async function runFallback(
   const attempts: FallbackAttempt[] = [
     {
       engine: 'edge-tts',
-      reason: `primary engine failed: ${describe(options.primaryError)}`,
+      reason:
+        options.primaryReason ??
+        `primary engine failed: ${describe(options.primaryError)}`,
     },
   ]
 
@@ -117,6 +134,11 @@ export async function runFallback(
 
   for (const engine of order) {
     if (engine === 'edge-tts') continue
+
+    if (options.skip?.has(engine)) {
+      attempts.push({ engine, reason: SKIPPED_BY_HEALTH })
+      continue
+    }
 
     if (engine === 'sapi') {
       if (!isSapiSupported(platform)) {
@@ -136,10 +158,13 @@ export async function runFallback(
           powershellBinary: deps.powershellBinary,
           ffmpegBinary: deps.ffmpegBinary,
         })
+        const engineState = deps.health?.stateOf(engine) ?? 'healthy'
+        deps.health?.recordSuccess(engine)
         attempts.push({ engine, reason: 'succeeded' })
-        return { kind: 'audio', audio, engine, attempts }
+        return { kind: 'audio', audio, engine, engineState, attempts }
       } catch (error) {
         if (error instanceof TtsError && error.code === ErrorCode.Aborted) throw error
+        deps.health?.recordFailure(engine, error)
         attempts.push({ engine, reason: describe(error) })
         continue
       }
