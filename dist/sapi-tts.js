@@ -102,6 +102,8 @@ export async function synthesizeSapi(text, options) {
             'libmp3lame',
             '-q:a',
             '4',
+            '-f',
+            'mp3',
             partialPath,
         ], {
             timeoutMs: options.timeoutMs,

@@ -38,6 +38,7 @@ import {
 } from './edge-tts.ts'
 import { ErrorCode, TtsError } from './errors.ts'
 import { isFallbackEligible, runFallback } from './fallback.ts'
+import type { FallbackAttempt } from './fallback.ts'
 import type { SapiOptions } from './sapi-tts.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
 import { probeEndpoint, type ProbeConnector } from './probe.ts'
@@ -132,12 +133,32 @@ function canonicalAudio(
   }
 }
 
+/**
+ * Condense per-engine failures for the `speechSynthesis` fallback. Absolute
+ * paths are stripped and each reason is truncated: the field is user-visible
+ * and must never leak temp paths, tokens or the source text.
+ */
+function summarizeAttempts(attempts: readonly FallbackAttempt[]): string {
+  return attempts
+    .map((attempt) => {
+      const reason = attempt.reason
+        .replace(/(?:[A-Za-z]:[\\/]|\/)[^\s'"`;:]+/g, '[path]')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const clipped =
+        reason.length > 160 ? `${reason.slice(0, 157)}...` : reason
+      return `${attempt.engine}: ${clipped}`
+    })
+    .join('; ')
+}
+
 /** Value produced when the host cannot synthesize but the client can speak. */
 interface SpeechSynthesisValue {
   fallback: 'speechSynthesis'
   text: string
   voice: string
   rate: string
+  fallbackReason?: string
 }
 
 /** Canonical tool outputs; `filePath`/`format` exist only for real audio. */
@@ -162,6 +183,7 @@ interface RenderableValue {
   text?: string
   voice?: string
   rate?: string
+  fallbackReason?: string
 }
 
 function requireText(text: string): void {
@@ -259,7 +281,7 @@ export function createTtsTools(
 
   type SynthesisOutcome =
     | { kind: 'audio'; audio: SynthesizedAudio; engine?: string }
-    | { kind: 'speechSynthesis' }
+    | { kind: 'speechSynthesis'; reason?: string }
 
   interface MergeGroup {
     promise: Promise<SynthesisOutcome>
@@ -338,7 +360,13 @@ export function createTtsTools(
     speech: Omit<SpeechSynthesisValue, 'fallback'>,
   ): GenerateValue => {
     if (outcome.kind === 'speechSynthesis') {
-      return { fallback: 'speechSynthesis', ...speech }
+      return {
+        fallback: 'speechSynthesis',
+        ...speech,
+        ...(outcome.reason === undefined
+          ? {}
+          : { fallbackReason: outcome.reason }),
+      }
     }
     return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine)
   }
@@ -350,7 +378,10 @@ export function createTtsTools(
    */
   const renderGeneratedAudio = (value: RenderableValue): string => {
     if (value.fallback === 'speechSynthesis') {
-      return `${ErrorCode.SpeechSynthesisRequired}: satisfied without a host audio file. Read the returned text with the browser speechSynthesis API. If a file was expected, install or repair edge-tts and retry.`
+      const base = `${ErrorCode.SpeechSynthesisRequired}: satisfied without a host audio file. Read the returned text with the browser speechSynthesis API. If a file was expected, install or repair edge-tts and retry.`
+      return value.fallbackReason === undefined
+        ? base
+        : `${base}\nReason: ${value.fallbackReason}`
     }
     const filePath = value.filePath ?? ''
     const format = value.format ?? ''
@@ -440,6 +471,11 @@ export function createTtsTools(
             type: 'string',
             description:
               'Effective rate, returned only when `fallback` is `speechSynthesis`.',
+          },
+          fallbackReason: {
+            type: 'string',
+            description:
+              'Condensed per-engine failure summary, returned only when `fallback` is `speechSynthesis`. Contains engine names, error codes and truncated stderr; never user text, tokens or absolute paths.',
           },
         },
         additionalProperties: false,
@@ -580,7 +616,10 @@ export function createTtsTools(
           )
 
           if (outcome.kind === 'speechSynthesis') {
-            return { kind: 'speechSynthesis' }
+            return {
+              kind: 'speechSynthesis',
+              reason: summarizeAttempts(outcome.attempts),
+            }
           }
           await recordMetadata(outcome.audio, outcome.engine, settings)
           return {

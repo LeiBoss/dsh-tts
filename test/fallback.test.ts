@@ -99,6 +99,7 @@ test('a non-Windows Edge-TTS failure returns the speechSynthesis marker', async 
 
     assert.deepEqual(Object.keys(result).sort(), [
       'fallback',
+      'fallbackReason',
       'rate',
       'text',
       'voice',
@@ -347,8 +348,45 @@ test('SAPI orchestration runs PowerShell then ffmpeg and publishes an MP3', asyn
       calls.map((call) => call.command),
       ['powershell.exe', 'ffmpeg'],
     )
+
+    const ffmpegArgs = calls[1]?.args ?? []
+    const formatIndex = ffmpegArgs.indexOf('-f')
+    assert.ok(formatIndex >= 0, 'ffmpeg must be told the muxer explicitly')
+    assert.equal(
+      ffmpegArgs[formatIndex + 1],
+      'mp3',
+      'the partial file has no .mp3 suffix, so -f mp3 is required',
+    )
   })
 })
+
+test(
+  'real ffmpeg produces a decodable MP3 (TTS_SAPI_INTEGRATION=1)',
+  {
+    skip:
+      process.env.TTS_SAPI_INTEGRATION !== '1' ||
+      process.platform !== 'win32',
+  },
+  async () => {
+    await withTempDir(async (dir) => {
+      const now = new Date(2026, 10, 11, 12, 0, 0)
+      const hash = cacheKey('real sapi integration', 'zh-CN-XiaoxiaoNeural', '+0%')
+      const audio = await synthesizeSapi('real sapi integration', {
+        rate: '+0%',
+        outputDir: dir,
+        hash,
+        timeoutMs: 30_000,
+        now,
+      })
+
+      const bytes = await readFile(audio.filePath)
+      assert.ok(bytes.length > 0, 'converted file must not be empty')
+      const id3 = bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33
+      const frame = bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0
+      assert.ok(id3 || frame, `not an MP3: ${bytes.subarray(0, 4).toString('hex')}`)
+    })
+  },
+)
 
 test('SAPI refuses to run on non-Windows platforms', async () => {
   await withTempDir(async (dir) => {
@@ -422,5 +460,41 @@ test('a missing sidecar keeps the legacy cache-hit shape', async () => {
     assert.equal(second.filePath, first.filePath)
     assert.equal('engine' in second, false)
     assert.equal(calls.length, 1)
+  })
+})
+
+test('the speechSynthesis fallback reports why every engine failed', async () => {
+  await withTempDir(async (dir) => {
+    const text = '这段文字不应出现在降级原因里'
+    const generate = setup(dir, {
+      spawnImpl: hangingSpawn([]).spawn,
+      platform: 'win32',
+      config: { timeoutMs: 20 },
+      sapiSynthesize: async () => {
+        throw new Error(
+          `ffmpeg exited with code -22: Unable to choose an output format for '${join(dir, 'clip.mp3.partial')}'`,
+        )
+      },
+    })
+
+    const result = await generate.execute({ text }, executionContext())
+
+    assert.equal(result.fallback, 'speechSynthesis')
+    const reason = result.fallbackReason
+    assert.equal(typeof reason, 'string')
+    assert.match(String(reason), /edge-tts:/)
+    assert.match(String(reason), /sapi:/)
+    assert.equal(String(reason).includes(dir), false, 'must not leak temp paths')
+    assert.equal(String(reason).includes(text), false, 'must not echo user text')
+
+    const rendered = String(
+      (
+        generate as unknown as {
+          output: { render: (args: unknown, value: unknown) => Array<{ text: string }> }
+        }
+      ).output.render({}, result)[0]?.text,
+    )
+    assert.match(rendered, /Reason: /)
+    assert.match(rendered, /edge-tts:/)
   })
 })
