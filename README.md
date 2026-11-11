@@ -3,6 +3,7 @@
 npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与本项目无关。
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+[![CI](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml/badge.svg)](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml)
 
 > Text-to-speech plugin for DSH. Edge-TTS engine, multi-voice, chunked long-text
 > synthesis, fallback chain. Returns playable audio files with browser-accessible URLs.
@@ -183,17 +184,28 @@ DSH Web 中，工具结果的 `render` 会在拿到宿主 `webServer.getOrigin()
 
 ## 验证
 
-已在本地验证：
+### 已验证（Windows 11 + DSH 0.2.2-rc.1）
 
-- `npm run build` 无类型错误。
-- `npm test` 全部通过（含路由 Range 200/206/416、签名 token、分块拼接、降级链、并发与 HMR）。
-- 路由处理器通过真实 HTTP socket 验证：同源 `Range` 返回 206，跨源请求返回 403。
+- 从 GitHub 安装：`dsh plugin --profile web add github:leiboss/dsh-tts`，插件正常激活。
+- `tts_self_check`：`edgeTtsAvailable` / `spawnAllowed` / `outputDirWritable` 均为 `true`。
+- `tts_generate`：返回文件路径与 `[▶ 播放](http://127.0.0.1:3080/dsh-tts/audio/...)` 绝对链接；文件写入 `~/.dsh/tts-output/<date>/`。
+- 播放路由：无浏览器会话的 `curl` 返回 401（`connection.requestRejection` 生效，属预期行为），带会话的浏览器可正常取到音频。
 
-离线可验（不依赖网络与真实 Edge-TTS）：
+### 未验证
+
+- 在浏览器中实际点击播放链接、拖动进度条。
+- SAPI 降级（本机无 `ffmpeg`）。
+- 反向代理场景（`trustedHosts`）。
+
+### 本地自测
 
 ```bash
-npm test
+npm run build
+npm test          # 离线单元测试，子进程已注入替身
+npm run check:engines
 ```
+
+长文本分块、缓存、并发、降级链与路由 Range 均有离线用例覆盖。
 
 端到端（需要真实 `edge-tts` 与网络）：
 
@@ -201,12 +213,7 @@ npm test
 npm run test:integration
 ```
 
-期望：生成一个非空 MP3 文件；终端的输出包含文件路径；重复执行命中缓存且不再启动子进程。
-
-需在真实环境验证：
-
-- DSH Web 中的 `browserUrl` 播放与进度条拖动（本仓库无宿主环境）。
-- Windows 上的 SAPI 降级（需要 `powershell.exe` 与 `ffmpeg`）。
+期望：生成一个非空 MP3 文件；终端输出包含文件路径；重复执行命中缓存且不再启动子进程。
 
 ## 能力接缝与沙箱
 

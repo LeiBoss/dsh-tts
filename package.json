@@ -49,6 +49,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.ts",
     "test:integration": "node test/integration.ts",
+    "check:engines": "node scripts/check-engines.mjs",
     "prepublishOnly": "npm run build && npm test"
   },
   "publishConfig": {
@@ -67,6 +68,7 @@
     "@deepseek-ai/dsh-llm": "0.0.1-rc.5",
     "@deepseek-ai/dsh-tools": "0.0.1-rc.1",
     "@types/node": "^24.0.0",
+    "semver": "^7.6.0",
     "typescript": "^5.9.0"
   }
 }
