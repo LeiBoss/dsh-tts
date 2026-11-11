@@ -1,0 +1,6 @@
+node_modules/
+*.tgz
+.DS_Store
+
+# dist/ is intentionally committed so `dsh plugin add github:LeiBoss/dsh-tts`
+# works without a build step. Run `npm run build` after editing src/.
