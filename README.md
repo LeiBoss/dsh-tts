@@ -82,6 +82,8 @@ npm install
 npm run build
 ```
 
+从本地目录安装（`dsh plugin add <目录>`）走的是 link，不会为该目录安装依赖；请先在仓库里执行 `npm ci`，否则激活时会报 `Cannot find package '@deepseek-ai/schemastery'`。从 npm 或 GitHub 安装不受影响，依赖由 pnpm 正常安装。
+
 安装后在 DSH 对话中确认工具存在：
 
 ```text
@@ -267,3 +269,5 @@ npm run test:integration
 - `npm run build`：TypeScript 编译到 `dist/`。
 - `npm test`：离线单元测试，使用注入的子进程替身，不依赖网络与真实 Edge-TTS。
 - `npm run test:integration`：真实端到端链路，需要 `edge-tts` 与网络。
+
+`engines.dsh` 必须能匹配当前运行的 DSH 版本；预发布版本（如 `0.2.2-rc.1`）低于同号正式版，写 `>=0.2.2` 会排除它。升级 DSH 后先确认该范围仍然成立。
