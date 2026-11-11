@@ -191,10 +191,6 @@ export function createTtsTools(config, deps = {}) {
                         type: 'string',
                         description: 'Audio container format, for example mp3. Present unless `fallback` is `speechSynthesis`.',
                     },
-                    durationMs: {
-                        type: 'number',
-                        description: 'Duration in milliseconds, when known.',
-                    },
                     browserUrl: {
                         type: 'string',
                         description: 'Same-origin URL that plays this audio in the DSH Web UI; absent when no web route is available.',

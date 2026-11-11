@@ -48,7 +48,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.ts",
-    "test:integration": "node test/integration.ts"
+    "test:integration": "node test/integration.ts",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.1.0 <5",

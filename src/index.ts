@@ -350,10 +350,6 @@ export function createTtsTools(
             description:
               'Audio container format, for example mp3. Present unless `fallback` is `speechSynthesis`.',
           },
-          durationMs: {
-            type: 'number',
-            description: 'Duration in milliseconds, when known.',
-          },
           browserUrl: {
             type: 'string',
             description:
