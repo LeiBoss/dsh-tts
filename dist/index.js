@@ -334,6 +334,13 @@ export function createTtsTools(config, deps = {}) {
     });
     return [generate, check];
 }
+/** Read an optional Cordis service without requiring a static dependency. */
+function serviceOf(ctx, name) {
+    const getter = ctx.get;
+    return typeof getter === 'function'
+        ? getter.call(ctx, name)
+        : undefined;
+}
 /**
  * Mount both tools. Registration is fiber-owned, so unloading the plugin
  * unregisters them without explicit cleanup.
@@ -347,16 +354,27 @@ export function apply(ctx, config) {
     const audioRoute = resolved.outputDir
         ? new AudioRoute({ outputDir: resolved.outputDir, debug })
         : undefined;
-    // Optional dependency: non-Web runtimes (for example Electron over file://)
-    // never provide `httpServer`, and the plugin still works without browserUrl.
+    // The Web host provides `webServer`. Older hosts exposed the same router as
+    // `httpServer`; if neither exists (for example Electron over file://), the
+    // plugin still works but returns no browserUrl.
     if (audioRoute) {
-        ctx.inject(['httpServer'], (webCtx) => {
-            const server = webCtx
-                .httpServer;
-            if (!server)
-                return;
-            webCtx.effect(() => audioRoute.register(server));
-        });
+        const webServer = serviceOf(ctx, 'webServer');
+        const legacy = webServer === undefined
+            ? serviceOf(ctx, 'httpServer')
+            : undefined;
+        const server = webServer ?? legacy;
+        if (server !== undefined) {
+            ctx.effect(() => audioRoute.register(server));
+        }
+        else {
+            ctx.inject(['webServer'], (webCtx) => {
+                const late = webCtx
+                    .webServer;
+                if (!late)
+                    return;
+                webCtx.effect(() => audioRoute.register(late));
+            });
+        }
     }
     for (const tool of createTtsTools(resolved, { audioRoute, log: debug })) {
         ctx.tools.register(tool);

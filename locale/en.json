@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Text to speech",
+    "description": "Synthesize text into audio files with multiple voices, long-text chunking, web playback links, and fallbacks."
+  }
+}

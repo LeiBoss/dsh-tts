@@ -24,7 +24,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
@@ -33,10 +36,14 @@
   },
   "files": [
     "dist",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18",
+    "dsh": ">=0.2.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -250,9 +250,9 @@ test('apply registers both tools and the route through ctx.inject', async () => 
         },
       },
       inject(deps: string[], callback: (scope: unknown) => void) {
-        assert.deepEqual(deps, ['httpServer'])
+        assert.deepEqual(deps, ['webServer'])
         callback({
-          httpServer: server,
+          webServer: server,
           effect(install: () => () => void) {
             effects.push(install())
           },
@@ -266,6 +266,42 @@ test('apply registers both tools and the route through ctx.inject', async () => 
     assert.equal(server.routes.length, 1)
     assert.equal(effects.length, 1)
     assert.equal(server.routes[0]?.path, AUDIO_ROUTE_PREFIX)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('apply falls back to ctx.get("httpServer") when webServer is absent', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
+  try {
+    const server = new FakeServer()
+    const tools: unknown[] = []
+    const effects: Array<() => void> = []
+    let injected = false
+
+    const ctx = {
+      tools: {
+        register(tool: unknown) {
+          tools.push(tool)
+        },
+      },
+      get(name: string) {
+        return name === 'httpServer' ? server : undefined
+      },
+      effect(install: () => () => void) {
+        effects.push(install())
+      },
+      inject() {
+        injected = true
+      },
+    }
+
+    apply(ctx as never, { outputDir: dir })
+
+    assert.equal(injected, false)
+    assert.equal(tools.length, 2)
+    assert.equal(server.routes.length, 1)
+    assert.equal(effects.length, 1)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

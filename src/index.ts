@@ -454,6 +454,14 @@ export function createTtsTools(
   return [generate, check]
 }
 
+/** Read an optional Cordis service without requiring a static dependency. */
+function serviceOf<T>(ctx: Context, name: string): T | undefined {
+  const getter = (ctx as unknown as { get?: (key: string) => unknown }).get
+  return typeof getter === 'function'
+    ? (getter.call(ctx, name) as T | undefined)
+    : undefined
+}
+
 /**
  * Mount both tools. Registration is fiber-owned, so unloading the plugin
  * unregisters them without explicit cleanup.
@@ -469,15 +477,27 @@ export function apply(ctx: Context, config?: Partial<TtsConfig>): void {
     ? new AudioRoute({ outputDir: resolved.outputDir, debug })
     : undefined
 
-  // Optional dependency: non-Web runtimes (for example Electron over file://)
-  // never provide `httpServer`, and the plugin still works without browserUrl.
+  // The Web host provides `webServer`. Older hosts exposed the same router as
+  // `httpServer`; if neither exists (for example Electron over file://), the
+  // plugin still works but returns no browserUrl.
   if (audioRoute) {
-    ctx.inject(['httpServer'], (webCtx) => {
-      const server = (webCtx as unknown as { httpServer?: HttpRouteRegistrar })
-        .httpServer
-      if (!server) return
-      webCtx.effect(() => audioRoute.register(server))
-    })
+    const webServer = serviceOf<HttpRouteRegistrar>(ctx, 'webServer')
+    const legacy =
+      webServer === undefined
+        ? serviceOf<HttpRouteRegistrar>(ctx, 'httpServer')
+        : undefined
+    const server = webServer ?? legacy
+
+    if (server !== undefined) {
+      ctx.effect(() => audioRoute.register(server))
+    } else {
+      ctx.inject(['webServer'], (webCtx) => {
+        const late = (webCtx as unknown as { webServer?: HttpRouteRegistrar })
+          .webServer
+        if (!late) return
+        webCtx.effect(() => audioRoute.register(late))
+      })
+    }
   }
 
   for (const tool of createTtsTools(resolved, { audioRoute, log: debug })) {

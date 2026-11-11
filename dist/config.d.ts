@@ -74,7 +74,7 @@ export interface TtsConfig {
 export interface ResolvedConfig {
     /** Harness home from `DSH_HOME`; empty when unset. */
     dshHome: string;
-    /** Absolute output root; empty when neither `outputDir` nor `DSH_HOME` is available. */
+    /** Absolute output root; derived from `outputDir` or the home directory. */
     outputDir: string;
     defaultVoice: string;
     timeoutMs: number;
@@ -89,9 +89,9 @@ export interface ResolvedConfig {
     queueTimeoutMs: number;
 }
 /**
- * Resolve config defaults without touching the filesystem. A missing
- * `DSH_HOME` is not fatal here: explicit `outputDir` still works, and the
- * self-check needs to report the missing value instead of failing to load.
+ * Resolve config defaults without touching the filesystem. `outputDir` falls
+ * back to `$DSH_HOME/tts-output` and then to `~/.dsh/tts-output`, so hosts
+ * that do not export `DSH_HOME` still work out of the box.
  */
 export declare function resolveConfig(raw?: Partial<TtsConfig>, env?: NodeJS.ProcessEnv): ResolvedConfig;
 /**

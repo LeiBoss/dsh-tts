@@ -1,4 +1,5 @@
-import { resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { ErrorCode, TtsError } from './errors.ts'
 
@@ -87,7 +88,7 @@ export interface TtsConfig {
 export interface ResolvedConfig {
   /** Harness home from `DSH_HOME`; empty when unset. */
   dshHome: string
-  /** Absolute output root; empty when neither `outputDir` nor `DSH_HOME` is available. */
+  /** Absolute output root; derived from `outputDir` or the home directory. */
   outputDir: string
   defaultVoice: string
   timeoutMs: number
@@ -108,9 +109,9 @@ function nonEmpty(value: string | undefined): string | undefined {
 }
 
 /**
- * Resolve config defaults without touching the filesystem. A missing
- * `DSH_HOME` is not fatal here: explicit `outputDir` still works, and the
- * self-check needs to report the missing value instead of failing to load.
+ * Resolve config defaults without touching the filesystem. `outputDir` falls
+ * back to `$DSH_HOME/tts-output` and then to `~/.dsh/tts-output`, so hosts
+ * that do not export `DSH_HOME` still work out of the box.
  */
 export function resolveConfig(
   raw?: Partial<TtsConfig>,
@@ -122,7 +123,7 @@ export function resolveConfig(
     ? resolve(configuredDir)
     : dshHome
       ? resolve(dshHome, OUTPUT_SUBDIR)
-      : ''
+      : join(homedir(), '.dsh', OUTPUT_SUBDIR)
 
   return {
     dshHome,

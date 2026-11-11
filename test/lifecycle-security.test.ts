@@ -79,9 +79,9 @@ function makeContext() {
       },
     },
     inject(deps: string[], callback: (scope: unknown) => void) {
-      assert.deepEqual(deps, ['httpServer'])
+      assert.deepEqual(deps, ['webServer'])
       callback({
-        httpServer: server,
+        webServer: server,
         effect(install: () => () => void) {
           effects.push(install())
         },
