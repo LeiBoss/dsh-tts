@@ -44,6 +44,11 @@ import { AVAILABLE_VOICES } from './voices.ts'
 
 export { Config } from './config.ts'
 export type { TtsConfig } from './config.ts'
+export type {
+  TTSProvider,
+  SynthesizeOptions,
+  SynthesizeResult,
+} from './provider.ts'
 export { ErrorCode, TtsError } from './errors.ts'
 export { cacheKey, findCachedFile } from './cache.ts'
 export { runProcess, synthesize } from './edge-tts.ts'

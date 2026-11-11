@@ -1,7 +1,7 @@
 {
   "name": "@leiboss/dsh-tts",
   "version": "0.2.0",
-  "description": "Text-to-speech plugin for DSH: Edge-TTS, multi-voice, chunked long-text synthesis, and fallback chain.",
+  "description": "Reliable TTS infrastructure for DSH plugin authors: concurrency-safe synthesis, layered error semantics, chunked long-text, and provider fallback. Returns playable audio with browser-accessible URLs.",
   "license": "MIT",
   "author": "leiboss",
   "repository": {
@@ -18,13 +18,18 @@
     "tts",
     "edge-tts",
     "text-to-speech",
-    "voice"
+    "voice",
+    "tts-backend",
+    "tts-provider",
+    "voice-infrastructure",
+    "plugin-infrastructure"
   ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./provider": "./dist/provider.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./package.json": "./package.json"
