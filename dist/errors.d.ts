@@ -17,6 +17,8 @@ export declare const ErrorCode: {
     readonly SynthesisTimeout: "SYNTHESIS_TIMEOUT";
     readonly EmptyAudio: "EMPTY_AUDIO";
     readonly Aborted: "ABORTED";
+    readonly AllFallbacksFailed: "ALL_FALLBACKS_FAILED";
+    readonly SpeechSynthesisRequired: "SPEECH_SYNTHESIS_REQUIRED";
 };
 export type TtsErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 /**

@@ -1,14 +1,22 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
+import { AudioRoute, } from "./audio-route.js";
 import { AUDIO_FORMAT, cacheKey, findCachedFile } from "./cache.js";
+import { synthesizeChunked } from "./chunked-tts.js";
 import { Config, DEFAULT_RATE, requireSynthesisConfig, resolveConfig, } from "./config.js";
-import { synthesize } from "./edge-tts.js";
+import { synthesize, } from "./edge-tts.js";
 import { ErrorCode, TtsError } from "./errors.js";
+import { isFallbackEligible, runFallback } from "./fallback.js";
 import { selfCheck } from "./self-check.js";
 export { Config } from "./config.js";
 export { ErrorCode, TtsError } from "./errors.js";
 export { cacheKey, findCachedFile } from "./cache.js";
 export { runProcess, synthesize } from "./edge-tts.js";
 export { selfCheck } from "./self-check.js";
+export { AUDIO_ROUTE_PREFIX, AudioRoute } from "./audio-route.js";
+export { DEFAULT_CHUNK_SIZE, splitText } from "./chunker.js";
+export { synthesizeChunked } from "./chunked-tts.js";
+export { isFallbackEligible, runFallback } from "./fallback.js";
+export { isSapiSupported, sapiRate, synthesizeSapi } from "./sapi-tts.js";
 export const name = 'dsh-tts';
 /** The registry must exist before `apply` runs. */
 export const inject = ['tools'];
@@ -19,6 +27,20 @@ export const inject = ['tools'];
 const VOICE_PATTERN = /^[a-z]{2,3}-[A-Z]{2,3}(?:-[a-z0-9]+)?-[A-Za-z0-9]+Neural$/;
 /** Edge-TTS rates are signed percentages such as `+0%` or `-10%`. */
 const RATE_PATTERN = /^[+-]\d{1,3}%$/;
+/**
+ * Canonical tool value. Only the fields declared in `output.schema` may
+ * appear; `browserUrl` is omitted when the host offers no web route and
+ * `engine` is omitted when the default Edge-TTS path produced the file.
+ */
+function canonicalAudio(audio, audioRoute, engine) {
+    const browserUrl = audioRoute?.urlFor(audio.filePath);
+    return {
+        filePath: audio.filePath,
+        format: audio.format,
+        ...(browserUrl === undefined ? {} : { browserUrl }),
+        ...(engine === undefined ? {} : { engine }),
+    };
+}
 function requireText(text) {
     if (text.trim().length === 0) {
         throw new TtsError(ErrorCode.EmptyText, '`text` must be a non-empty string.', 'Pass the text that should be spoken; whitespace-only input is rejected.');
@@ -90,13 +112,29 @@ export function createTtsTools(config, deps = {}) {
                         type: 'number',
                         description: 'Duration in milliseconds, when known.',
                     },
+                    browserUrl: {
+                        type: 'string',
+                        description: 'Same-origin URL that plays this audio in the DSH Web UI; absent when no web route is available.',
+                    },
+                    engine: {
+                        type: 'string',
+                        description: 'Engine that produced the audio when it was not the default Edge-TTS path, for example `sapi`.',
+                    },
+                    fallback: {
+                        type: 'string',
+                        description: '`speechSynthesis` when no host audio file was produced and the caller should speak the text with the browser API.',
+                    },
                 },
                 additionalProperties: false,
             },
             render: (_args, value) => [
                 {
                     type: 'text',
-                    text: `Generated audio: ${value.filePath} (${value.format})`,
+                    text: value.fallback === 'speechSynthesis'
+                        ? `${ErrorCode.SpeechSynthesisRequired}: no host audio file was produced. Use the browser speechSynthesis API to read the text.`
+                        : value.browserUrl
+                            ? `Generated audio: ${value.filePath} (${value.format})\nPlayback URL: ${value.browserUrl}`
+                            : `Generated audio: ${value.filePath} (${value.format})`,
                 },
             ],
         },
@@ -107,24 +145,73 @@ export function createTtsTools(config, deps = {}) {
             requireVoice(voice);
             const rate = args.rate?.trim() || DEFAULT_RATE;
             requireRate(rate);
-            const { outputDir, timeoutMs } = requireSynthesisConfig(config);
+            const { outputDir, timeoutMs, chunkSize, chunkingEnabled, fallbackEnabled, fallbackOrder, } = requireSynthesisConfig(config);
             const hash = cacheKey(text, voice, rate);
             const cached = await findCachedFile(outputDir, hash);
             if (cached !== undefined) {
-                return { filePath: cached, format: AUDIO_FORMAT };
+                return canonicalAudio({ filePath: cached, format: AUDIO_FORMAT }, deps.audioRoute);
             }
-            const audio = await synthesize(text, {
-                voice,
-                rate,
-                binary: config.edgeTtsBinary,
-                outputDir,
-                hash,
-                timeoutMs,
-                signal: exec.signal,
-                spawnImpl: deps.spawnImpl,
-                now: deps.now?.(),
-            });
-            return { filePath: audio.filePath, format: audio.format };
+            const primary = async () => chunkingEnabled && text.length > chunkSize
+                ? await synthesizeChunked(text, {
+                    voice,
+                    rate,
+                    binary: config.edgeTtsBinary,
+                    outputDir,
+                    hash,
+                    timeoutMs,
+                    chunkSize,
+                    signal: exec.signal,
+                    spawnImpl: deps.spawnImpl,
+                    now: deps.now?.(),
+                    interChunkDelayMs: deps.chunkDelayMs,
+                })
+                : await synthesize(text, {
+                    voice,
+                    rate,
+                    binary: config.edgeTtsBinary,
+                    outputDir,
+                    hash,
+                    timeoutMs,
+                    signal: exec.signal,
+                    spawnImpl: deps.spawnImpl,
+                    now: deps.now?.(),
+                });
+            let audio;
+            try {
+                audio = await primary();
+            }
+            catch (error) {
+                // Validation, config, cache, and abort errors never fall back.
+                if (!fallbackEnabled || !isFallbackEligible(error))
+                    throw error;
+                const outcome = await runFallback({
+                    text,
+                    rate,
+                    outputDir,
+                    hash,
+                    timeoutMs,
+                    fallbackOrder,
+                    signal: exec.signal,
+                    now: deps.now?.(),
+                    primaryError: error,
+                }, {
+                    platform: deps.platform,
+                    spawnImpl: deps.spawnImpl,
+                    powershellBinary: deps.powershellBinary,
+                    ffmpegBinary: deps.ffmpegBinary,
+                    synthesizeSapiImpl: deps.sapiSynthesize,
+                });
+                if (outcome.kind === 'speechSynthesis') {
+                    return {
+                        filePath: '',
+                        format: '',
+                        engine: outcome.engine,
+                        fallback: outcome.engine,
+                    };
+                }
+                return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine);
+            }
+            return canonicalAudio(audio, deps.audioRoute);
         },
     });
     const check = defineTool({
@@ -182,7 +269,21 @@ export function createTtsTools(config, deps = {}) {
  */
 export function apply(ctx, config) {
     const resolved = resolveConfig(config);
-    for (const tool of createTtsTools(resolved)) {
+    const audioRoute = resolved.outputDir
+        ? new AudioRoute({ outputDir: resolved.outputDir })
+        : undefined;
+    // Optional dependency: non-Web runtimes (for example Electron over file://)
+    // never provide `httpServer`, and the plugin still works without browserUrl.
+    if (audioRoute) {
+        ctx.inject(['httpServer'], (webCtx) => {
+            const server = webCtx
+                .httpServer;
+            if (!server)
+                return;
+            webCtx.effect(() => audioRoute.register(server));
+        });
+    }
+    for (const tool of createTtsTools(resolved, { audioRoute })) {
         ctx.tools.register(tool);
     }
 }

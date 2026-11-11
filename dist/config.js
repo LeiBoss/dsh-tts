@@ -11,6 +11,22 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 export const DEFAULT_EDGE_TTS_BINARY = 'edge-tts';
 /** Subdirectory of `DSH_HOME` that owns every generated audio file. */
 export const OUTPUT_SUBDIR = 'tts-output';
+/** Target characters per chunk, and the one-shot threshold. */
+export const DEFAULT_CHUNK_SIZE = 1_200;
+/** Long texts are chunked by default. */
+export const DEFAULT_CHUNKING_ENABLED = true;
+/** Engines the fallback chain understands, in default priority order. */
+export const DEFAULT_FALLBACK_ORDER = [
+    'edge-tts',
+    'sapi',
+    'speechSynthesis',
+];
+/** Fallback is enabled unless configured otherwise. */
+export const DEFAULT_FALLBACK_ENABLED = true;
+/** Narrow an arbitrary config string to a known engine. */
+export function isTtsEngine(value) {
+    return DEFAULT_FALLBACK_ORDER.includes(value);
+}
 /**
  * Config schema exposed to the DSH configuration layer. Defaults live here (not
  * in call sites) so the settings surface and runtime behaviour agree.
@@ -20,6 +36,10 @@ export const Config = z.object({
     defaultVoice: z.string().default(DEFAULT_VOICE),
     timeoutMs: z.number().default(DEFAULT_TIMEOUT_MS),
     edgeTtsBinary: z.string().default(DEFAULT_EDGE_TTS_BINARY),
+    chunkSize: z.number().default(DEFAULT_CHUNK_SIZE),
+    chunkingEnabled: z.boolean().default(DEFAULT_CHUNKING_ENABLED),
+    fallbackEnabled: z.boolean().default(DEFAULT_FALLBACK_ENABLED),
+    fallbackOrder: z.array(z.string()).default([...DEFAULT_FALLBACK_ORDER]),
 });
 function nonEmpty(value) {
     const trimmed = value?.trim();
@@ -44,6 +64,12 @@ export function resolveConfig(raw, env = process.env) {
         defaultVoice: nonEmpty(raw?.defaultVoice) ?? DEFAULT_VOICE,
         timeoutMs: raw?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         edgeTtsBinary: nonEmpty(raw?.edgeTtsBinary) ?? DEFAULT_EDGE_TTS_BINARY,
+        chunkSize: raw?.chunkSize ?? DEFAULT_CHUNK_SIZE,
+        chunkingEnabled: raw?.chunkingEnabled ?? DEFAULT_CHUNKING_ENABLED,
+        fallbackEnabled: raw?.fallbackEnabled ?? DEFAULT_FALLBACK_ENABLED,
+        fallbackOrder: raw?.fallbackOrder === undefined
+            ? [...DEFAULT_FALLBACK_ORDER]
+            : raw.fallbackOrder.filter(isTtsEngine),
     };
 }
 /**
@@ -57,6 +83,17 @@ export function requireSynthesisConfig(config) {
     if (!Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0) {
         throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: timeoutMs must be a positive number, got ${JSON.stringify(config.timeoutMs)}.`, 'Set `timeoutMs` to a positive millisecond value (default 30000).');
     }
-    return { outputDir: config.outputDir, timeoutMs: config.timeoutMs };
+    if (config.chunkingEnabled &&
+        (!Number.isInteger(config.chunkSize) || config.chunkSize <= 0)) {
+        throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: chunkSize must be a positive integer, got ${JSON.stringify(config.chunkSize)}.`, 'Set `chunkSize` to a positive character count (default 1200), or disable chunking.');
+    }
+    return {
+        outputDir: config.outputDir,
+        timeoutMs: config.timeoutMs,
+        chunkSize: config.chunkSize,
+        chunkingEnabled: config.chunkingEnabled,
+        fallbackEnabled: config.fallbackEnabled,
+        fallbackOrder: config.fallbackOrder,
+    };
 }
 //# sourceMappingURL=config.js.map

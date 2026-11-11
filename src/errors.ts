@@ -18,6 +18,8 @@ export const ErrorCode = {
   SynthesisTimeout: 'SYNTHESIS_TIMEOUT',
   EmptyAudio: 'EMPTY_AUDIO',
   Aborted: 'ABORTED',
+  AllFallbacksFailed: 'ALL_FALLBACKS_FAILED',
+  SpeechSynthesisRequired: 'SPEECH_SYNTHESIS_REQUIRED',
 } as const
 
 export type TtsErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]

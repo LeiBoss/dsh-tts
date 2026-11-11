@@ -39,18 +39,27 @@ dsh plugin add dsh-tts
    { "filePath": "/absolute/path/$DSH_HOME/tts-output/2026-11-11/<hash>-<timestamp>.mp3", "format": "mp3" }
    ```
 
-   模型只拿到文件路径，不感知音频内容。
+   模型只拿到文件路径与可选的播放地址，不感知音频内容。
+
+   当 DSH Web 宿主提供 `httpServer` 时，返回值还会包含 `browserUrl`（同源、带签名与
+   有效期、支持 HTTP Range 206 的 GET 路由），浏览器可直接打开播放。非 Web 运行模式
+   下只返回 `filePath`。使用降级引擎时还会包含 `engine`；宿主端无法产出文件时会返回
+   `fallback: "speechSynthesis"`，由调用方使用浏览器语音合成。
 
 ## 配置
 
-四项配置均可通过 DSH 配置层（插件 config）覆盖，插件不会自行读写 profile 的 `cordis.patch.yml`：
+以下配置项均可通过 DSH 配置层（插件 config）覆盖，插件不会自行读写 profile 的 `cordis.patch.yml`：
 
 | 配置项 | 默认值 | 作用 | 覆盖方式 |
 | --- | --- | --- | --- |
 | `outputDir` | `$DSH_HOME/tts-output` | 音频输出根目录，实际文件写入其下的 `<YYYY-MM-DD>/` 子目录 | 在插件 config 中设置 `outputDir` |
 | `defaultVoice` | `zh-CN-XiaoxiaoNeural` | 调用 `tts_generate` 未传 `voice` 时使用的音色 | 在插件 config 中设置 `defaultVoice` |
-| `timeoutMs` | `30000` | 单次 Edge-TTS 子进程超时，超时后终止并报错 | 在插件 config 中设置 `timeoutMs` |
+| `timeoutMs` | `30000` | 单个 Edge-TTS 子进程超时，超时后终止并报错 | 在插件 config 中设置 `timeoutMs` |
 | `edgeTtsBinary` | `edge-tts` | Edge-TTS CLI 名称或可执行文件路径 | 在插件 config 中设置 `edgeTtsBinary` |
+| `chunkSize` | `1200` | 超过该字符数的文本按句子边界分块，串行合成后拼接为单个 MP3 | 在插件 config 中设置 `chunkSize` |
+| `chunkingEnabled` | `true` | 是否启用长文本分块；关闭后长文本一次性交给 Edge-TTS | 在插件 config 中设置 `chunkingEnabled` |
+| `fallbackEnabled` | `true` | Edge-TTS 失败后是否尝试降级链 | 在插件 config 中设置 `fallbackEnabled` |
+| `fallbackOrder` | `['edge-tts', 'sapi', 'speechSynthesis']` | 降级链顺序；未知引擎名会被忽略 | 在插件 config 中设置 `fallbackOrder` |
 
 示例（仅覆盖默认值，不修改代码）：
 
@@ -74,6 +83,8 @@ dsh plugin add dsh-tts
 | `SYNTHESIS_TIMEOUT` | Edge-TTS 子进程超过 `timeoutMs` 未结束 | 增大 `timeoutMs`，并检查到 Edge-TTS 服务的网络连接 |
 | `EDGE_TTS_FAILED` | Edge-TTS 子进程非零退出 | 查看错误信息中的退出码与 stderr；检查音色名、语速和网络 |
 | `EMPTY_TEXT` | `text` 为纯空白 | 传入非空文本 |
+| `ALL_FALLBACKS_FAILED` | 降级链中的所有宿主端引擎都失败（且链中没有 `speechSynthesis`） | 查看错误信息中列出的引擎链与各引擎原因；恢复 Edge-TTS 或把 `speechSynthesis` 加入 `fallbackOrder` |
+| `SPEECH_SYNTHESIS_REQUIRED` | 宿主端无法产出音频，返回值标记 `fallback: "speechSynthesis"` | 由调用方使用浏览器 `speechSynthesis` API 朗读原文 |
 
 错误对象包含机器可读的 `code`、人类可读的 `message`，以及可选的 `suggestion`。
 
@@ -82,7 +93,9 @@ dsh plugin add dsh-tts
 - 需要联网访问 Edge-TTS 服务，网络不通时会出现 `SYNTHESIS_TIMEOUT` 或 `EDGE_TTS_FAILED`。
 - 首次使用前必须安装 `edge-tts` Python 包，否则报 `EDGE_TTS_NOT_FOUND`。
 - 沙箱环境可能以 `EPERM` 拒绝子进程，此时报 `SPAWN_EPERM`，需要调整 DSH 沙箱策略。
-- 当前只有一个引擎（Edge-TTS），不支持多 Provider 路由。
+- 降级仅在 Edge-TTS 引擎失败（子进程非零退出、超时、空音频、无法启动）时触发；参数校验失败与缓存命中不会降级。
+- SAPI 降级仅限 Windows，通过 `powershell.exe` 合成 WAV，再要求 `ffmpeg` 转换为 MP3；缺少 `ffmpeg` 时继续降级到 `speechSynthesis`。SAPI 使用系统默认语音，不映射 Edge 的 `voice` 参数。
+- 宿主端无法产出文件且链中包含 `speechSynthesis` 时，返回 `filePath` 为空字符串的标记值，需要调用方配合朗读。
 - 当前不解析音频容器时长，返回值的可选字段 `durationMs` 会省略。
 
 ## 开发与测试

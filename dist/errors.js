@@ -17,6 +17,8 @@ export const ErrorCode = {
     SynthesisTimeout: 'SYNTHESIS_TIMEOUT',
     EmptyAudio: 'EMPTY_AUDIO',
     Aborted: 'ABORTED',
+    AllFallbacksFailed: 'ALL_FALLBACKS_FAILED',
+    SpeechSynthesisRequired: 'SPEECH_SYNTHESIS_REQUIRED',
 };
 /**
  * Structured plugin error: a routable `code`, a human-readable message, and an
