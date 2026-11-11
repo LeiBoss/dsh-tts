@@ -119,6 +119,46 @@ npm run build
 把“你好”合成语音
 ```
 
+## For plugin authors
+
+If you are building a reader plugin, a notification plugin, or an agent that needs
+reliable audio synthesis, you can call `tts_generate` as a tool, or depend on the
+`TTSProvider` interface directly.
+
+**Option A: call the tool** (recommended for agents)
+
+```typescript
+const result = await ctx.tools.call('tts_generate', {
+  text: 'Build completed',
+  voice: 'zh-CN-YunxiNeural',
+})
+// result: { filePath, format, browserUrl?, engine?, fallback? }
+```
+
+**Option B: import the provider** (for plugins that want to own the playback UX)
+
+```typescript
+import type { TTSProvider, SynthesizeResult } from '@leiboss/dsh-tts/provider'
+
+// Resolve a provider instance from the DSH service registry,
+// or construct the Edge-TTS provider directly if you are embedding it.
+```
+
+**Error handling contract**
+
+Treat these error codes differently — the distinction is the point:
+
+| Code | Meaning | Recommended handling |
+|---|---|---|
+| `TTS_BUSY` | Concurrency limit or queue full | Retry after a short delay |
+| `SPAWN_EPERM` | Sandbox blocked subprocess creation | Surface to user as environment issue; do not retry |
+| `EDGE_TTS_FAILED` | Upstream Edge-TTS failure | Trigger your own fallback, or rely on this plugin's fallback chain |
+| `SYNTHESIS_TIMEOUT` | Synthesis exceeded timeout | Retry with shorter text or larger `timeoutMs` |
+| `ALL_FALLBACKS_FAILED` | All engines in `fallbackOrder` failed | Surface to user; do not retry without environment change |
+
+Do not treat all errors as equivalent. A caller that retries `SPAWN_EPERM` will
+loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessarily.
+
 ## 配置
 
 所有配置都通过 DSH 配置层覆盖，不在工具参数里传入。
@@ -210,46 +250,6 @@ DSH Web 中，本插件还声明了客户端入口（`dsh.client`，`exports["./
 | `en-US-AriaNeural` | 女 | 英文（美式） | 默认英文女声 |
 | `en-US-GuyNeural` | 男 | 英文（美式） | 英文男声 |
 | `en-US-JennyNeural` | 女 | 英文（美式） | 对话感英文女声 |
-
-## For plugin authors
-
-If you are building a reader plugin, a notification plugin, or an agent that needs
-reliable audio synthesis, you can call `tts_generate` as a tool, or depend on the
-`TTSProvider` interface directly.
-
-**Option A: call the tool** (recommended for agents)
-
-```typescript
-const result = await ctx.tools.call('tts_generate', {
-  text: 'Build completed',
-  voice: 'zh-CN-YunxiNeural',
-})
-// result: { filePath, format, browserUrl?, engine?, fallback? }
-```
-
-**Option B: import the provider** (for plugins that want to own the playback UX)
-
-```typescript
-import type { TTSProvider, SynthesizeResult } from '@leiboss/dsh-tts/provider'
-
-// Resolve a provider instance from the DSH service registry,
-// or construct the Edge-TTS provider directly if you are embedding it.
-```
-
-**Error handling contract**
-
-Treat these error codes differently — the distinction is the point:
-
-| Code | Meaning | Recommended handling |
-|---|---|---|
-| `TTS_BUSY` | Concurrency limit or queue full | Retry after a short delay |
-| `SPAWN_EPERM` | Sandbox blocked subprocess creation | Surface to user as environment issue; do not retry |
-| `EDGE_TTS_FAILED` | Upstream Edge-TTS failure | Trigger your own fallback, or rely on this plugin's fallback chain |
-| `SYNTHESIS_TIMEOUT` | Synthesis exceeded timeout | Retry with shorter text or larger `timeoutMs` |
-| `ALL_FALLBACKS_FAILED` | All engines in `fallbackOrder` failed | Surface to user; do not retry without environment change |
-
-Do not treat all errors as equivalent. A caller that retries `SPAWN_EPERM` will
-loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessarily.
 
 ## 验证
 
