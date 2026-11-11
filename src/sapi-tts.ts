@@ -82,7 +82,9 @@ export async function synthesizeSapi(
   const tempDir = await mkdtemp(join(tmpdir(), 'dsh-tts-sapi-'))
   const wavPath = join(tempDir, 'speech.wav')
   const textPath = join(tempDir, 'input.txt')
-  const partialPath = `${target}.partial`
+  // Keep an `.mp3` suffix: ffmpeg infers the muxer from the extension, and the
+  // target is only published by the final atomic rename.
+  const partialPath = `${target}.partial.mp3`
 
   try {
     await writeFile(textPath, text, 'utf8')
@@ -142,8 +144,6 @@ export async function synthesizeSapi(
         'libmp3lame',
         '-q:a',
         '4',
-        '-f',
-        'mp3',
         partialPath,
       ],
       {
