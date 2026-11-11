@@ -179,7 +179,9 @@ npm run build
 
 `browserUrl` 是同源相对地址，链接与当前 DSH 浏览器会话绑定：在浏览器里打开可以播放，但**不适合对外分享**。它带有效期与签名；签名密钥持久化在输出目录的 `.audio-route-secret`，插件重载后旧链接仍可用；删除该文件会轮换全部链接。需要分享时请直接发送音频文件。
 
-DSH Web 中，工具结果的 `render` 会在拿到宿主 `webServer.getOrigin()` 时把 `browserUrl` 拼成绝对地址，输出 `[▶ 播放](...)`。**这是 Markdown 文本**：当前 DSH 的工具结果按纯文本展示，不会自动渲染成链接，需要用客户端播放器或在回复正文里重新引用该地址。JSON 返回值里的 `browserUrl` 仍是相对路径。拿不到 origin（例如 headless 或 `file://`）时不猜 `localhost`，退回相对 `Playback URL` 文本。
+DSH Web 中，本插件还声明了客户端入口（`dsh.client`，`exports["./client"]`）：`tts_generate` 的工具结果里只要有 `browserUrl`，就会在对话中渲染一个原生 `<audio controls preload="none">` 播放器，点击即可播放。播放器不自动播放，URL 缺失（headless、路由未注册、`speechSynthesis` 降级）时不渲染任何内容。宿主 `ToolResultNode` 不暴露结构化返回值，客户端因此从结果的渲染文本里取同源 `/dsh-tts/audio/...` 路径。
+
+工具结果的 `render` 在拿到宿主 `webServer.getOrigin()` 时还会把 `browserUrl` 拼成绝对地址，输出 `[▶ 播放](...)`。**这是 Markdown 文本**，DSH 的工具结果按纯文本展示，不会自动渲染成链接；可点击的播放入口是上面的内联播放器，或在回复正文里重新引用该地址。JSON 返回值里的 `browserUrl` 仍是相对路径。拿不到 origin（例如 headless 或 `file://`）时不猜 `localhost`，退回相对 `Playback URL` 文本。
 
 当所有宿主引擎都不可用时，返回（`fallbackReason` 为各引擎失败原因摘要，见「错误码」）：
 
@@ -256,12 +258,13 @@ loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessari
 
 - 从 GitHub 安装：`dsh plugin --profile web add github:leiboss/dsh-tts`，插件正常激活。
 - `tts_self_check`：`edgeTtsAvailable` / `spawnAllowed` / `outputDirWritable` 均为 `true`。
-- `tts_generate`：返回文件路径与 `[▶ 播放](http://127.0.0.1:3080/dsh-tts/audio/...)` 文本（Markdown 未渲染，需在回复正文引用）；文件写入 `~/.dsh/tts-output/<date>/`。
+- `tts_generate`：返回文件路径与 `[▶ 播放](http://127.0.0.1:3080/dsh-tts/audio/...)` 文本；文件写入 `~/.dsh/tts-output/<date>/`。
 - 播放路由：无浏览器会话的 `curl` 返回 401（`connection.requestRejection` 生效，属预期行为），带会话的浏览器可正常取到音频。
 
 ### 未验证
 
-- 在浏览器中实际点击播放链接、拖动进度条。
+- 内联播放器在浏览器中的实际渲染与点击播放（客户端入口只做了静态检查与 `extractAudioUrls` 单测）。
+- 在浏览器中点击 Markdown 形式的 `[▶ 播放](...)`、拖动进度条。
 - SAPI 降级（本机无 `ffmpeg`）。
 - 反向代理场景（`trustedHosts`）。
 
@@ -303,7 +306,7 @@ npm run test:integration
 - **沙箱可能拒绝子进程**：报 `SPAWN_EPERM`，这是进程创建被策略拦截，不是文件不可写。缓解：调整 DSH 沙箱进程策略，或接受 `speechSynthesis` 标记由客户端朗读。
 - **`pitch`/`volume` 不参与缓存键**：相同文本、音色、语速的第二次调用会返回首次生成的文件，即使本次指定了不同的 pitch/volume。缓解：更换 `voice` 或 `rate`，或手动删除对应缓存文件。
 - **非 Windows 没有 SAPI 降级**：Linux/macOS 上会跳过 SAPI。缓解：保证 Edge-TTS 可用，或将 `speechSynthesis` 保留在降级链中。
-- **客户端内联播放器未提供**：DSH 的工具结果按纯文本展示，`render` 里的 `[▶ 播放](...)` 不会自动渲染为链接，也拿不到工具返回值来挂载 `<audio>` 控件。缓解：在回复正文里重新引用 `browserUrl`，或直接使用返回的 `filePath`；后续需要宿主提供工具结果插槽或音频内容块才能内联播放。
+- **内联播放器只在 DSH Web 生效**：客户端入口注册的是 keyed `tool.call.toolview`，只在工具结果里出现 `browserUrl` 时渲染原生 `<audio>`；headless、`file://`、未加载客户端插件的宿主不会显示播放器。若播放器不可用，回退到在回复正文里引用 `browserUrl` 或直接使用返回的 `filePath`。
 - **来源校验交给宿主**：路由优先调用 `ctx.connection.requestRejection`（Host/Origin + 浏览器会话校验）。链接与当前 DSH 浏览器会话绑定：不带会话 cookie 的请求（包括 `curl`）会返回 401/403，因此不要把 `browserUrl` 当作可对外分享的公开链接，需要分享时请直接发送音频文件。旧宿主没有 `connection` 时回退为内置 Host 端口 + `Origin`/`Host` 同源校验，并保留签名 token 作为第二道防线。
 - **反向代理需要 `trustedHosts`**：代理常改端口，配置 `trustedHosts` 后跳过端口钉死；留空则要求 Host 端口与监听端口一致。
 - **签名密钥可轮换**：密钥存于 `<outputDir>/.audio-route-secret`，删除即让已发出的全部链接失效；文件读取/写入失败时回退内存密钥并只影响本次进程。
