@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { cacheKey } from '../src/cache.ts'
 import { resolveConfig } from '../src/config.ts'
@@ -97,11 +97,18 @@ test('a non-Windows Edge-TTS failure returns the speechSynthesis marker', async 
 
     const result = await generate.execute({ text: 'fallback marker' }, executionContext())
 
-    assert.deepEqual(Object.keys(result).sort(), ['engine', 'fallback', 'filePath', 'format'])
-    assert.equal(result.filePath, '')
-    assert.equal(result.format, '')
-    assert.equal(result.engine, 'speechSynthesis')
+    assert.deepEqual(Object.keys(result).sort(), [
+      'fallback',
+      'rate',
+      'text',
+      'voice',
+    ])
+    assert.equal('filePath' in result, false)
+    assert.equal('format' in result, false)
     assert.equal(result.fallback, 'speechSynthesis')
+    assert.equal(result.text, 'fallback marker')
+    assert.equal(result.voice, 'zh-CN-XiaoxiaoNeural')
+    assert.equal(result.rate, '+0%')
     assert.equal(calls.length, 1, 'SAPI must be skipped on Linux')
   })
 })
@@ -355,5 +362,65 @@ test('SAPI refuses to run on non-Windows platforms', async () => {
       }),
       /only available on Windows/,
     )
+  })
+})
+
+test('a SAPI cache hit still reports engine=sapi from its sidecar', async () => {
+  await withTempDir(async (dir) => {
+    const calls: SpawnRecord[] = []
+    const generate = setup(dir, {
+      platform: 'win32',
+      spawnImpl: failingSpawn(calls, 2, 'edge down'),
+      sapiSynthesize: async (_text, options) => {
+        const target = outputFilePath(
+          options.outputDir,
+          options.hash,
+          options.now,
+        )
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, 'ID3sapi')
+        return { filePath: target, format: 'mp3' }
+      },
+    })
+
+    const first = await generate.execute(
+      { text: 'sapi cache hit' },
+      executionContext(),
+    )
+    assert.equal(first.engine, 'sapi')
+
+    const second = await generate.execute(
+      { text: 'sapi cache hit' },
+      executionContext(),
+    )
+    assert.equal(second.filePath, first.filePath)
+    assert.equal(second.engine, 'sapi')
+    assert.equal(calls.length, 1, 'cache hit must not spawn again')
+
+    const metadata = JSON.parse(
+      await readFile(`${first.filePath}.json`, 'utf8'),
+    )
+    assert.equal(metadata.engine, 'sapi')
+  })
+})
+
+test('a missing sidecar keeps the legacy cache-hit shape', async () => {
+  await withTempDir(async (dir) => {
+    const calls: SpawnRecord[] = []
+    const generate = setup(dir, { spawnImpl: successfulSpawn(calls) })
+
+    const first = await generate.execute(
+      { text: 'no sidecar' },
+      executionContext(),
+    )
+    await rm(`${first.filePath}.json`, { force: true })
+
+    const second = await generate.execute(
+      { text: 'no sidecar' },
+      executionContext(),
+    )
+    assert.equal(second.filePath, first.filePath)
+    assert.equal('engine' in second, false)
+    assert.equal(calls.length, 1)
   })
 })

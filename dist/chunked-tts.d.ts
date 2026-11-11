@@ -13,6 +13,8 @@ export interface ChunkedSynthesisOptions {
     /** Cache key of the full original text. */
     hash: string;
     timeoutMs: number;
+    /** Whole-call budget across every chunk and inter-chunk delay. */
+    totalTimeoutMs?: number;
     chunkSize: number;
     signal?: AbortSignal;
     spawnImpl?: SpawnFunction;

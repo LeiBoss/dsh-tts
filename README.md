@@ -1,15 +1,17 @@
 # dsh-tts
 
+npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与本项目无关。
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 > Text-to-speech plugin for DSH. Edge-TTS engine, multi-voice, chunked long-text
 > synthesis, fallback chain. Returns playable audio files with browser-accessible URLs.
 
-**Install:** `dsh plugin --profile web add dsh-tts`
+**Install:** `dsh plugin --profile web add @leiboss/dsh-tts`
 
 ## 简介
 
-`dsh-tts` 是一个 DSH 工具插件：把文本合成为音频文件，返回本地路径与可选的同源播放地址。它不是播放器，不做语音转写，也不做音色克隆。
+`@leiboss/dsh-tts` 是一个 DSH 工具插件：把文本合成为音频文件，返回本地路径与可选的同源播放地址。它不是播放器，不做语音转写，也不做音色克隆。
 
 核心特性：
 
@@ -25,9 +27,11 @@
 | DSH 能力 | 用途 |
 | --- | --- |
 | `ctx.tools.register` | 注册 `tts_generate` 与 `tts_self_check`；注册随插件 fiber 注销，支持热更新 |
-| `ctx.inject(['httpServer'])` | 可选依赖宿主 HTTP 路由；非 Web 运行模式自动跳过 |
-| `ctx.httpServer.register` | 注册 `prefix` 路由 `/dsh-tts/audio`，返回音频字节并处理 Range |
-| DSH 配置层（`Config` + `apply` 的 config） | 读取 11 项配置；插件不自行读写 `cordis.patch.yml` |
+| `ctx.inject(['webServer'])` | 可选依赖宿主 Web 路由；旧宿主回退 `ctx.get('httpServer')`，都不存在时只返回 `filePath` |
+| `webServer.register` | 注册 `prefix` 路由 `/dsh-tts/audio`，返回音频字节并处理 Range |
+| `ctx.connection.requestRejection` | 宿主 Host/Origin 与浏览器认证校验；不接 `admit`，保持链接可外发 |
+| `ctx.get('connection')` | 读取 `allowsRemoteAuthorities`，远程访问时放宽 Host 校验 |
+| DSH 配置层（`Config` + `apply` 的 config） | 读取 13 项配置；插件不自行读写 `cordis.patch.yml` |
 | `child_process.spawn` | 调用 `edge-tts`；降级时调用 `powershell.exe` 与 `ffmpeg` |
 | 文件系统 | 写入 `$DSH_HOME/tts-output/<YYYY-MM-DD>/<hash>-<timestamp>.mp3` |
 
@@ -37,10 +41,10 @@
 
 | 工具 | 参数 | 返回 | 何时调用 |
 | --- | --- | --- | --- |
-| `tts_generate` | `text`（必填）、`voice`、`rate`、`pitch`、`volume` | `{ filePath, format, durationMs?, browserUrl?, engine?, fallback? }` | 用户要求把文字读出来、生成配音或音频文件时 |
+| `tts_generate` | `text`（必填）、`voice`、`rate`、`pitch`、`volume` | `{ filePath, format, browserUrl?, engine?, fallback?, text?, voice?, rate? }` | 用户要求把文字读出来、生成配音或音频文件时 |
 | `tts_self_check` | 无 | `{ edgeTtsAvailable, edgeTtsVersion?, spawnAllowed, outputDirWritable, dshHome, availableVoices }` | 安装后自检，或 `tts_generate` 报环境类错误时 |
 
-`tts_generate` 不播放音频、不转录音频、不克隆或修改音色、不做音频后处理，也不生成音乐。`durationMs` 当前不会返回，保留为后续扩展字段。
+`tts_generate` 不播放音频、不转录音频、不克隆或修改音色、不做音频后处理，也不生成音乐。`filePath` 与 `format` 在正常合成时存在；当返回 `fallback: "speechSynthesis"` 时只返回 `text`、`voice`、`rate`，由调用方朗读。当前不提供音频时长。
 
 默认值：`voice = zh-CN-XiaoxiaoNeural`，`rate = +0%`，`pitch = +0Hz`，`volume = +0%`。
 
@@ -48,7 +52,8 @@
 
 环境要求：
 
-- Node.js ≥ 22
+- Node.js ≥ 22.18
+- DSH ≥ 0.2.2
 - Python 3
 - `pip install edge-tts`
 - Windows 上使用 SAPI 降级时还需要 `ffmpeg` 在 PATH 中（用于 WAV → MP3）
@@ -56,13 +61,17 @@
 首选 npm（包发布后可用）：
 
 ```bash
-dsh plugin --profile web add dsh-tts
+dsh plugin --profile web add @leiboss/dsh-tts        # 发布后
+dsh plugin --profile web add github:leiboss/dsh-tts  # 发布前/备用
 ```
 
-GitHub 备选：
+> 警告：npm 上的裸名 `dsh-tts` 属于其他维护者，与本项目无关，请勿安装。
+
+从旧版本迁移：旧依赖目录名是 `dsh-tts`，与新的 scoped 包名不匹配，必须先移除再安装，否则会残留 `Cannot find module 'dsh-tts'` 或工具重名：
 
 ```bash
-dsh plugin --profile web add github:leiboss/dsh-tts
+dsh plugin --profile web remove dsh-tts
+dsh plugin --profile web add @leiboss/dsh-tts
 ```
 
 仓库包含编译产物 `dist/`。如果从源码工作，先执行：
@@ -92,7 +101,7 @@ npm run build
 
 | 配置项 | 默认值 | 作用 | 覆盖方式 |
 | --- | --- | --- | --- |
-| `outputDir` | `$DSH_HOME/tts-output` | 音频输出根目录，文件写入其下日期子目录 | 插件 config 的 `outputDir` |
+| `outputDir` | `$DSH_HOME/tts-output` | 音频输出根目录；未设 `DSH_HOME` 时回退 `~/.dsh/tts-output` | 插件 config 的 `outputDir` |
 | `defaultVoice` | `zh-CN-XiaoxiaoNeural` | 未传 `voice` 时使用的音色 | 插件 config 的 `defaultVoice` |
 | `timeoutMs` | `30000` | 单个 Edge-TTS 子进程（或单个分块）的超时 | 插件 config 的 `timeoutMs` |
 | `edgeTtsBinary` | `edge-tts` | Edge-TTS CLI 名称或绝对路径 | 插件 config 的 `edgeTtsBinary` |
@@ -103,6 +112,8 @@ npm run build
 | `maxConcurrent` | `2` | 同时运行的完整合成任务数 | 插件 config 的 `maxConcurrent` |
 | `queueSize` | `4` | 等待槽位的请求上限 | 插件 config 的 `queueSize` |
 | `queueTimeoutMs` | `10000` | 排队等待上限，超时返回 `TTS_BUSY` | 插件 config 的 `queueTimeoutMs` |
+| `totalTimeoutMs` | `180000` | 一次 `tts_generate` 的总预算，覆盖所有分块与块间延迟 | 插件 config 的 `totalTimeoutMs` |
+| `trustedHosts` | `[]` | 反向代理场景的额外 Host 白名单；非空时跳过端口钉死 | 插件 config 的 `trustedHosts` |
 
 ## 使用
 
@@ -140,7 +151,13 @@ npm run build
 }
 ```
 
-`browserUrl` 是同源相对地址，可在浏览器地址栏直接打开播放；它带有效期与签名，不能跨源复用。
+`browserUrl` 是同源相对地址，可在浏览器地址栏直接打开播放；它带有效期与签名。签名密钥持久化在输出目录的 `.audio-route-secret`，插件重载后旧链接仍可用；删除该文件会轮换全部链接。
+
+当所有宿主引擎都不可用时，返回：
+
+```json
+{ "fallback": "speechSynthesis", "text": "原文", "voice": "zh-CN-XiaoxiaoNeural", "rate": "+0%" }
+```
 
 ## 可用音色
 
@@ -194,9 +211,11 @@ npm run test:integration
 - **`pitch`/`volume` 不参与缓存键**：相同文本、音色、语速的第二次调用会返回首次生成的文件，即使本次指定了不同的 pitch/volume。缓解：更换 `voice` 或 `rate`，或手动删除对应缓存文件。
 - **非 Windows 没有 SAPI 降级**：Linux/macOS 上会跳过 SAPI。缓解：保证 Edge-TTS 可用，或将 `speechSynthesis` 保留在降级链中。
 - **客户端播放入口缺失**：当前只返回 `browserUrl`，需要用户在浏览器中打开，没有内联 `<audio>` 控件。缓解：后续迭代再提供客户端播放器。
-- **来源校验为降级实现**：当前 DSH 版本未提供 `ctx.connection.requestRejection`，路由使用 Host 端口 + `Origin` 与 `Host` 同源校验，并保留签名 token 作为第二道防线。缓解：不要在不可信共享网络中直接暴露 DSH 端口，使用反向代理与网络隔离。
+- **来源校验交给宿主**：路由优先调用 `ctx.connection.requestRejection`（Host/Origin 与浏览器认证），失败时 401/403。为保留“链接可外发”，插件不接 `admit`，因此不带 DSH 会话 cookie 的 `curl` 直连会被拒绝；需要命令行验证时请从浏览器携带 Cookie。旧宿主没有 `connection` 时回退为内置 Host 端口 + `Origin`/`Host` 同源校验，并保留签名 token 作为第二道防线。
+- **反向代理需要 `trustedHosts`**：代理常改端口，配置 `trustedHosts` 后跳过端口钉死；留空则要求 Host 端口与监听端口一致。
+- **签名密钥可轮换**：密钥存于 `<outputDir>/.audio-route-secret`，删除即让已发出的全部链接失效；文件读取/写入失败时回退内存密钥并只影响本次进程。
 - **分块是字节拼接**：MP3 直接按字节拼接，不重新编码。缓解：长文本仍产出一个可播放文件；若播放器兼容性异常，可关闭分块或改用外部工具后处理。
-- **`durationMs` 未实现**：当前不解析音频容器时长，该字段省略。
+- **不提供音频时长**：输出 schema 不再声明 `durationMs`，需要时长请用外部工具探测。
 
 ## 错误码
 
@@ -205,19 +224,21 @@ npm run test:integration
 | `EMPTY_TEXT` | `text` 为空白 | 传入非空文本 |
 | `INVALID_VOICE` | `voice` 不符合 Edge-TTS 命名格式 | 使用如 `zh-CN-XiaoxiaoNeural` 的音色名 |
 | `INVALID_RATE` | `rate` 不是 `+N%` / `-N%` | 使用 `+0%`、`-10%` 这类值 |
-| `INVALID_CONFIG` | 配置值非法（如 `timeoutMs`、`chunkSize`、`maxConcurrent`、`queueSize`） | 按默认值范围修正配置 |
+| `INVALID_PITCH` | `pitch` 不是 `+NHz` / `-NHz`（1–3 位数字） | 使用 `+0Hz`、`+10Hz` 这类值 |
+| `INVALID_VOLUME` | `volume` 不是 `+N%` / `-N%`（1–3 位数字） | 使用 `+0%`、`-20%` 这类值 |
+| `INVALID_CONFIG` | 配置值非法（如 `timeoutMs`、`totalTimeoutMs`、`chunkSize`、`maxConcurrent`、`queueSize`） | 按默认值范围修正配置 |
 | `DSH_HOME_NOT_SET` | 未设置 `DSH_HOME` 且未配置 `outputDir` | 设置 `DSH_HOME` 或 `outputDir` |
 | `OUTPUT_DIR_NOT_WRITABLE` | 输出目录无法写入 | 检查沙箱文件策略与目录权限 |
 | `EDGE_TTS_NOT_FOUND` | 找不到 `edge-tts` | `pip install edge-tts` 或设置 `edgeTtsBinary` |
 | `SPAWN_EPERM` | 沙箱拒绝创建子进程 | 调整 DSH 沙箱进程策略，不是文件权限问题 |
 | `SPAWN_FAILED` | 其他子进程创建失败 | 检查 `edgeTtsBinary` 是否可执行 |
 | `EDGE_TTS_FAILED` | Edge-TTS 非零退出 | 查看错误中的退出码与 stderr，检查网络与音色 |
-| `SYNTHESIS_TIMEOUT` | 单个子进程超过 `timeoutMs` | 增大 `timeoutMs` 或检查网络 |
+| `SYNTHESIS_TIMEOUT` | 单个子进程超过 `timeoutMs`，或整次调用超过 `totalTimeoutMs` | 增大对应超时、缩短文本或检查网络 |
 | `EMPTY_AUDIO` | Edge-TTS 退出成功但音频为空 | 重试；仍失败时运行 `tts_self_check` |
 | `ABORTED` | 调用被取消 | 无需处理；调用方已取消 |
 | `TTS_BUSY` | 队列满或排队超时 | 稍后重试，或增大 `maxConcurrent` / `queueSize` / `queueTimeoutMs` |
 | `ALL_FALLBACKS_FAILED` | 降级链全部失败且链中无 `speechSynthesis` | 恢复 Edge-TTS，或把 `speechSynthesis` 加入 `fallbackOrder` |
-| `SPEECH_SYNTHESIS_REQUIRED` | 宿主无法产出音频，返回 `fallback: "speechSynthesis"` | 由调用方使用浏览器 `speechSynthesis` 朗读原文 |
+| `SPEECH_SYNTHESIS_REQUIRED` | 宿主无法产出音频，返回 `fallback: "speechSynthesis"` | 由调用方朗读返回的 `text`；如需文件请安装/修复 edge-tts 后重试 |
 
 ## 开发与测试
 

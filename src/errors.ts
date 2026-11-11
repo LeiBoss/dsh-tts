@@ -8,6 +8,8 @@ export const ErrorCode = {
   EmptyText: 'EMPTY_TEXT',
   InvalidVoice: 'INVALID_VOICE',
   InvalidRate: 'INVALID_RATE',
+  InvalidPitch: 'INVALID_PITCH',
+  InvalidVolume: 'INVALID_VOLUME',
   InvalidConfig: 'INVALID_CONFIG',
   DshHomeNotSet: 'DSH_HOME_NOT_SET',
   OutputDirNotWritable: 'OUTPUT_DIR_NOT_WRITABLE',

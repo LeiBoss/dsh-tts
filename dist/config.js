@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { ErrorCode, TtsError } from "./errors.js";
 /** Voice Edge-TTS uses when neither config nor the call specifies one. */
@@ -29,6 +30,10 @@ export const DEFAULT_MAX_CONCURRENT = 2;
 export const DEFAULT_QUEUE_SIZE = 4;
 /** How long a caller may wait for a slot before TTS_BUSY. */
 export const DEFAULT_QUEUE_TIMEOUT_MS = 10_000;
+/** Upper bound for one complete `tts_generate` call, across all chunks. */
+export const DEFAULT_TOTAL_TIMEOUT_MS = 180_000;
+/** Extra Host names accepted by the audio route (reverse proxies). */
+export const DEFAULT_TRUSTED_HOSTS = [];
 /** Narrow an arbitrary config string to a known engine. */
 export function isTtsEngine(value) {
     return DEFAULT_FALLBACK_ORDER.includes(value);
@@ -49,6 +54,8 @@ export const Config = z.object({
     maxConcurrent: z.number().default(DEFAULT_MAX_CONCURRENT),
     queueSize: z.number().default(DEFAULT_QUEUE_SIZE),
     queueTimeoutMs: z.number().default(DEFAULT_QUEUE_TIMEOUT_MS),
+    totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
+    trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
 });
 function nonEmpty(value) {
     const trimmed = value?.trim();
@@ -66,7 +73,7 @@ export function resolveConfig(raw, env = process.env) {
         ? resolve(configuredDir)
         : dshHome
             ? resolve(dshHome, OUTPUT_SUBDIR)
-            : '';
+            : join(homedir(), '.dsh', OUTPUT_SUBDIR);
     return {
         dshHome,
         outputDir,
@@ -82,6 +89,10 @@ export function resolveConfig(raw, env = process.env) {
         maxConcurrent: raw?.maxConcurrent ?? DEFAULT_MAX_CONCURRENT,
         queueSize: raw?.queueSize ?? DEFAULT_QUEUE_SIZE,
         queueTimeoutMs: raw?.queueTimeoutMs ?? DEFAULT_QUEUE_TIMEOUT_MS,
+        totalTimeoutMs: raw?.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS,
+        trustedHosts: (raw?.trustedHosts ?? [...DEFAULT_TRUSTED_HOSTS])
+            .map((host) => host.trim().toLowerCase())
+            .filter((host) => host.length > 0),
     };
 }
 /**
@@ -109,6 +120,9 @@ export function requireSynthesisConfig(config) {
     if (!Number.isFinite(config.queueTimeoutMs) || config.queueTimeoutMs <= 0) {
         throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: queueTimeoutMs must be a positive number, got ${JSON.stringify(config.queueTimeoutMs)}.`, 'Set `queueTimeoutMs` to a positive millisecond value (default 10000).');
     }
+    if (!Number.isFinite(config.totalTimeoutMs) || config.totalTimeoutMs <= 0) {
+        throw new TtsError(ErrorCode.InvalidConfig, `Invalid config: totalTimeoutMs must be a positive number, got ${JSON.stringify(config.totalTimeoutMs)}.`, 'Set `totalTimeoutMs` to a positive millisecond value (default 180000).');
+    }
     return {
         outputDir: config.outputDir,
         timeoutMs: config.timeoutMs,
@@ -119,6 +133,8 @@ export function requireSynthesisConfig(config) {
         maxConcurrent: config.maxConcurrent,
         queueSize: config.queueSize,
         queueTimeoutMs: config.queueTimeoutMs,
+        totalTimeoutMs: config.totalTimeoutMs,
+        trustedHosts: config.trustedHosts,
     };
 }
 //# sourceMappingURL=config.js.map

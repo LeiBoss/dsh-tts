@@ -79,9 +79,9 @@ function makeContext() {
       },
     },
     inject(deps: string[], callback: (scope: unknown) => void) {
-      assert.deepEqual(deps, ['httpServer'])
+      assert.deepEqual(deps, ['webServer'])
       callback({
-        httpServer: server,
+        webServer: server,
         effect(install: () => () => void) {
           effects.push(install())
         },
@@ -124,6 +124,57 @@ function request(
   const pending = route.handle(req, res as unknown as ServerResponse)
   return pending.then(() => finished).then(() => res)
 }
+
+test('apply wires ctx.connection.requestRejection into the audio route', async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, 'clip.mp3'), 'ID3clip')
+    let handler:
+      | ((req: IncomingMessage, res: ServerResponse) => void)
+      | undefined
+    const server = {
+      host: '127.0.0.1',
+      port: 3000,
+      register(route: RegisterableRoute) {
+        handler = route.handler
+        return () => {}
+      },
+    }
+    const effects: Array<() => void> = []
+    const ctx = {
+      tools: { register() {} },
+      get(name: string) {
+        if (name === 'connection') {
+          return { requestRejection: () => 401 as const }
+        }
+        if (name === 'webServer') return server
+        return undefined
+      },
+      effect(install: () => () => void) {
+        effects.push(install())
+      },
+    }
+
+    apply(ctx as never, { outputDir: dir })
+    assert.ok(handler)
+
+    const res = new FakeResponse()
+    const finished = new Promise<void>((resolve) =>
+      res.on('finish', () => resolve()),
+    )
+    handler(
+      {
+        method: 'GET',
+        url: `${AUDIO_ROUTE_PREFIX}/whatever`,
+        headers: {},
+      } as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+    )
+    await finished
+
+    assert.equal(res.statusCode, 401)
+    assert.equal(res.body.toString(), 'Unauthorized')
+  })
+})
 
 test('apply -> dispose -> apply re-registers tools and route cleanly', async () => {
   await withTempDir(async (dir) => {

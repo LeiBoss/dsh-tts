@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -58,14 +58,21 @@ class FakeServer {
 function request(
   route: AudioRoute,
   url: string,
-  options: { method?: string; range?: string } = {},
+  options: {
+    method?: string
+    range?: string
+    headers?: Record<string, string>
+  } = {},
 ): Promise<FakeResponse> {
   const res = new FakeResponse()
   const finished = new Promise<void>((resolve) => res.on('finish', () => resolve()))
   const req = {
     method: options.method ?? 'GET',
     url,
-    headers: options.range === undefined ? {} : { range: options.range },
+    headers: {
+      ...(options.range === undefined ? {} : { range: options.range }),
+      ...options.headers,
+    },
   } as unknown as IncomingMessage
 
   const pending = route.handle(req, res as unknown as ServerResponse)
@@ -75,7 +82,19 @@ function request(
 async function withAudioFile(
   bytes: Buffer,
   run: (route: AudioRoute, filePath: string) => Promise<void>,
-  options: { ttlMs?: number; now?: () => number } = {},
+  options: {
+    ttlMs?: number
+    now?: () => number
+    trustedHosts?: string[]
+    expectedPort?: number
+    debug?: (message: string) => void
+    connection?: {
+      requestRejection?(input: {
+        headers: Record<string, string | string[] | undefined>
+      }): 401 | 403 | undefined
+      allowsRemoteAuthorities?: boolean
+    }
+  } = {},
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
   try {
@@ -236,12 +255,13 @@ test('tts_generate returns browserUrl once the route is registered', async () =>
   }
 })
 
-test('apply registers both tools and the route through ctx.inject', async () => {
+test('apply falls back to ctx.get("httpServer") when webServer is absent', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
   try {
     const server = new FakeServer()
     const tools: unknown[] = []
     const effects: Array<() => void> = []
+    let injected = false
 
     const ctx = {
       tools: {
@@ -249,24 +269,92 @@ test('apply registers both tools and the route through ctx.inject', async () => 
           tools.push(tool)
         },
       },
-      inject(deps: string[], callback: (scope: unknown) => void) {
-        assert.deepEqual(deps, ['httpServer'])
-        callback({
-          httpServer: server,
-          effect(install: () => () => void) {
-            effects.push(install())
-          },
-        })
+      get(name: string) {
+        return name === 'httpServer' ? server : undefined
+      },
+      effect(install: () => () => void) {
+        effects.push(install())
+      },
+      inject() {
+        injected = true
       },
     }
 
     apply(ctx as never, { outputDir: dir })
 
+    assert.equal(injected, false)
     assert.equal(tools.length, 2)
     assert.equal(server.routes.length, 1)
     assert.equal(effects.length, 1)
-    assert.equal(server.routes[0]?.path, AUDIO_ROUTE_PREFIX)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('trustedHosts accepts a proxied Host and skips port pinning', async () => {
+  await withAudioFile(
+    Buffer.from('ID3trusted'),
+    async (route, filePath) => {
+      const url = route.urlFor(filePath) ?? ''
+      const headers = {
+        host: 'proxy.test:9999',
+        origin: 'http://proxy.test:9999',
+      }
+
+      const denied = await request(route, url, {
+        headers: { host: 'evil.test:9999', origin: 'http://evil.test:9999' },
+      })
+      assert.equal(denied.statusCode, 403)
+
+      const allowed = await request(route, url, {
+        headers,
+        range: 'bytes=0-2',
+      })
+      assert.equal(allowed.statusCode, 206)
+      assert.equal(allowed.body.toString(), 'ID3')
+    },
+    { trustedHosts: ['proxy.test'], expectedPort: 3000 },
+  )
+})
+
+test('requestRejection rejects before the token check and logs without secrets', async () => {
+  const messages: string[] = []
+  await withAudioFile(
+    Buffer.from('ID3host'),
+    async (route, filePath) => {
+      const res = await request(route, route.urlFor(filePath) ?? '')
+      assert.equal(res.statusCode, 403)
+      assert.equal(res.body.toString(), 'Forbidden')
+      assert.ok(messages.some((line) => line.includes('host connection')))
+      assert.ok(messages.every((line) => !line.includes('eyJ')))
+    },
+    {
+      debug: (message) => messages.push(message),
+      connection: { requestRejection: () => 403 },
+    },
+  )
+})
+
+test('the signing secret persists across route instances', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-route-'))
+  try {
+    const dateDir = join(dir, '2026-11-11')
+    await mkdir(dateDir, { recursive: true })
+    const filePath = join(dateDir, 'abcdef0123456789-1.mp3')
+    await writeFile(filePath, Buffer.from('ID3secret'))
+
+    const first = new AudioRoute({ outputDir: dir, now: () => 1_000 })
+    first.register(new FakeServer())
+    const url = first.urlFor(filePath)
+
+    const second = new AudioRoute({ outputDir: dir, now: () => 1_000 })
+    second.register(new FakeServer())
+
+    assert.equal(second.urlFor(filePath), url)
+    const secret = await readFile(join(dir, '.audio-route-secret'), 'utf8')
+    assert.match(secret.trim(), /^[0-9a-f]{64}$/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+

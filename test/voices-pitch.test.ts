@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
+import { writeFileSync } from 'node:fs'
 import { readFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { resolveConfig } from '../src/config.ts'
 import type { SpawnFunction } from '../src/edge-tts.ts'
+import { ErrorCode } from '../src/errors.ts'
 import { createTtsTools } from '../src/index.ts'
 import { AVAILABLE_VOICES, VOICES } from '../src/voices.ts'
 import {
+  FakeChild,
   executionContext,
   successfulSpawn,
   type SpawnRecord,
@@ -47,6 +50,83 @@ test('the static catalogue has at least ten unique voices including the default'
     assert.ok(voice.locale.length > 0)
     assert.ok(voice.description.length > 0)
   }
+})
+
+test('invalid pitch and volume are rejected before any subprocess', async () => {
+  await withTempDir(async (dir) => {
+    for (const [field, value, code] of [
+      ['pitch', '+10px', ErrorCode.InvalidPitch],
+      ['pitch', '10Hz', ErrorCode.InvalidPitch],
+      ['volume', '-20', ErrorCode.InvalidVolume],
+      ['volume', '20%', ErrorCode.InvalidVolume],
+    ] as const) {
+      const calls: SpawnRecord[] = []
+      const { generate } = setup(dir, successfulSpawn(calls))
+
+      await assert.rejects(
+        generate.execute(
+          { text: 'validation', [field]: value },
+          executionContext(),
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof Error)
+          assert.equal((error as { code?: string }).code, code)
+          return true
+        },
+      )
+      assert.equal(calls.length, 0, `${field}=${value} must not spawn`)
+    }
+  })
+})
+
+test('totalTimeoutMs stops a chunked call before every chunk finishes', async () => {
+  await withTempDir(async (dir) => {
+    const slowSpawn: SpawnFunction = (_command, args) => {
+      const child = new FakeChild()
+      const timer = setTimeout(() => {
+        const media = args.find((arg) => arg.startsWith('--write-media='))
+        if (media) writeFileSync(media.slice('--write-media='.length), 'ID3slow')
+        child.emit('close', 0, null)
+      }, 40)
+      const kill = child.kill.bind(child)
+      child.kill = (signal) => {
+        clearTimeout(timer)
+        return kill(signal)
+      }
+      return child
+    }
+    const { generate } = setup(dir, slowSpawn, {
+      chunkingEnabled: true,
+      chunkSize: 10,
+      timeoutMs: 30_000,
+      totalTimeoutMs: 20,
+      fallbackEnabled: false,
+    })
+
+    await assert.rejects(
+      generate.execute(
+        { text: '一二三四五六七八九十。'.repeat(5) },
+        executionContext(),
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.equal((error as { code?: string }).code, ErrorCode.SynthesisTimeout)
+        assert.match(String((error as Error).message), /Overall synthesis deadline/)
+        return true
+      },
+    )
+  })
+})
+
+test('totalTimeoutMs must be positive', async () => {
+  const { requireSynthesisConfig } = await import('../src/config.ts')
+  assert.throws(
+    () =>
+      requireSynthesisConfig(
+        resolveConfig({ outputDir: '/tmp/x', totalTimeoutMs: 0 }, {}),
+      ),
+    /totalTimeoutMs/,
+  )
 })
 
 test('tts_self_check returns availableVoices without extra subprocesses', async () => {

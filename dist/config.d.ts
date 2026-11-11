@@ -23,6 +23,10 @@ export declare const DEFAULT_MAX_CONCURRENT = 2;
 export declare const DEFAULT_QUEUE_SIZE = 4;
 /** How long a caller may wait for a slot before TTS_BUSY. */
 export declare const DEFAULT_QUEUE_TIMEOUT_MS = 10000;
+/** Upper bound for one complete `tts_generate` call, across all chunks. */
+export declare const DEFAULT_TOTAL_TIMEOUT_MS = 180000;
+/** Extra Host names accepted by the audio route (reverse proxies). */
+export declare const DEFAULT_TRUSTED_HOSTS: readonly string[];
 /** One engine in the fallback chain. */
 export type TtsEngine = (typeof DEFAULT_FALLBACK_ORDER)[number];
 /** Narrow an arbitrary config string to a known engine. */
@@ -43,6 +47,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     maxConcurrent: z<number, number, "defined">;
     queueSize: z<number, number, "defined">;
     queueTimeoutMs: z<number, number, "defined">;
+    totalTimeoutMs: z<number, number, "defined">;
+    trustedHosts: z<string[], string[], "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     outputDir: z<string, string, "plain">;
     defaultVoice: z<string, string, "defined">;
@@ -55,6 +61,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     maxConcurrent: z<number, number, "defined">;
     queueSize: z<number, number, "defined">;
     queueTimeoutMs: z<number, number, "defined">;
+    totalTimeoutMs: z<number, number, "defined">;
+    trustedHosts: z<string[], string[], "defined">;
 }>>, "plain">;
 /** Config accepted by {@link apply}; every field is optional and defaulted. */
 export interface TtsConfig {
@@ -69,12 +77,14 @@ export interface TtsConfig {
     maxConcurrent?: number;
     queueSize?: number;
     queueTimeoutMs?: number;
+    totalTimeoutMs?: number;
+    trustedHosts?: string[];
 }
 /** Effective, path-resolved plugin settings. */
 export interface ResolvedConfig {
     /** Harness home from `DSH_HOME`; empty when unset. */
     dshHome: string;
-    /** Absolute output root; empty when neither `outputDir` nor `DSH_HOME` is available. */
+    /** Absolute output root; falls back to `~/.dsh/tts-output`. */
     outputDir: string;
     defaultVoice: string;
     timeoutMs: number;
@@ -87,6 +97,8 @@ export interface ResolvedConfig {
     maxConcurrent: number;
     queueSize: number;
     queueTimeoutMs: number;
+    totalTimeoutMs: number;
+    trustedHosts: string[];
 }
 /**
  * Resolve config defaults without touching the filesystem. A missing
@@ -108,5 +120,7 @@ export declare function requireSynthesisConfig(config: ResolvedConfig): {
     maxConcurrent: number;
     queueSize: number;
     queueTimeoutMs: number;
+    totalTimeoutMs: number;
+    trustedHosts: string[];
 };
 //# sourceMappingURL=config.d.ts.map

@@ -2,17 +2,23 @@
  * Same-origin HTTP route for generated audio.
  *
  * The DSH Web host owns the HTTP server; this module only registers a prefix
- * route on `ctx.httpServer` (never listens on its own port). URLs carry an
- * HMAC-signed, expiring token that names a file *relative to the configured
- * output directory*, so a token can never be turned into an arbitrary path
- * read. Range requests are answered with `206 Partial Content`, which is what
- * lets an `<audio>` element seek inside a long file.
+ * route on the host `webServer` service (never listens on its own port). URLs
+ * carry an HMAC-signed, expiring token that names a file *relative to the
+ * configured output directory*, so a token can never be turned into an
+ * arbitrary path read. Range requests are answered with `206 Partial Content`,
+ * which is what lets an `<audio>` element seek inside a long file.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import {
+  chmodSync,
+  createReadStream,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { extname, isAbsolute, relative, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 
 /** Path prefix owned by this plugin. The signed token is the next segment. */
 export const AUDIO_ROUTE_PREFIX = '/dsh-tts/audio'
@@ -27,14 +33,33 @@ export interface RegisterableRoute {
   handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
 }
 
-/** Structural view of `ctx.httpServer`; only `register` is used. */
+/** Structural view of the host `webServer` service; only `register` is used. */
 export interface HttpRouteRegistrar {
   register(route: RegisterableRoute): () => void
   /** Advertised bind host, when the host exposes it. */
   host?: string
   /** Actual listening port, when the host exposes it. */
   port?: number
+  /** Scheme advertised by the host, when available. */
+  protocol?: string
+  /** Origin advertised by the host, when available. */
+  getOrigin?(): string | undefined
 }
+
+/**
+ * Host-provided trust fence. DSH 0.2.2 exposes this as `ctx.connection`;
+ * `admit` is intentionally not used so links remain shareable to a browser
+ * that has no DSH session cookie.
+ */
+export interface ConnectionFence {
+  requestRejection?(input: {
+    headers: Record<string, string | string[] | undefined>
+  }): 401 | 403 | undefined
+  allowsRemoteAuthorities?: boolean
+}
+
+/** Name of the persisted HMAC secret inside the output directory. */
+export const SECRET_FILE_NAME = '.audio-route-secret'
 
 /** Resolves a local audio path to a browser-openable URL, when routable. */
 export interface AudioUrlProvider {
@@ -48,6 +73,8 @@ export interface AudioRouteOptions {
   ttlMs?: number
   /** Override the per-instance HMAC secret (tests only). */
   secret?: Buffer
+  /** Path of the persisted secret; defaults to `<outputDir>/.audio-route-secret`. */
+  secretPath?: string
   /** Injectable clock in epoch milliseconds. */
   now?: () => number
   /** Hostnames allowed in `Host`; unset means any hostname (port still checked). */
@@ -56,6 +83,10 @@ export interface AudioRouteOptions {
   expectedPort?: number
   /** Debug sink for origin rejections; receives no token or path. */
   debug?: (message: string) => void
+  /** Extra trusted Host names (reverse proxies); disables port pinning. */
+  trustedHosts?: readonly string[]
+  /** Host trust fence, when DSH exposes `ctx.connection`. */
+  connection?: ConnectionFence
 }
 
 /** Longest suffix accepted by {@link parseRange}; keeps the parser simple. */
@@ -120,6 +151,59 @@ function defaultAllowedHosts(host: string): string[] {
   return [...new Set(['localhost', '127.0.0.1', '::1', normalized])]
 }
 
+function isLoopbackHost(host: string | undefined): boolean {
+  if (host === undefined) return true
+  const normalized = host.replace(/^\[|\]$/g, '').toLowerCase()
+  return (
+    normalized === '' ||
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized.startsWith('127.')
+  )
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Load the persisted HMAC secret, creating it on first use. Persistence keeps
+ * previously issued URLs valid across plugin reloads. Any filesystem failure
+ * degrades to an in-memory secret instead of failing plugin load.
+ */
+function loadOrCreateSecret(
+  path: string,
+  debug?: (message: string) => void,
+): Buffer {
+  try {
+    const hex = readFileSync(path, 'utf8').trim()
+    if (/^[0-9a-f]{64}$/i.test(hex)) return Buffer.from(hex, 'hex')
+    debug?.('audio route secret was malformed; rotating')
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? (error as { code?: unknown }).code
+        : undefined
+    if (code !== 'ENOENT') {
+      debug?.(`audio route secret read failed: ${describe(error)}`)
+    }
+  }
+
+  const secret = randomBytes(32)
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, secret.toString('hex'), { encoding: 'utf8', mode: 0o600 })
+    try {
+      chmodSync(path, 0o600)
+    } catch {
+      // Windows does not implement POSIX modes; best effort only.
+    }
+  } catch (error) {
+    debug?.(`audio route secret persistence failed: ${describe(error)}`)
+  }
+  return secret
+}
+
 /**
  * Owns the signed-token format and the HTTP handler. One instance per plugin
  * load; `register` binds it to the host router and returns a disposer.
@@ -130,18 +214,30 @@ export class AudioRoute implements AudioUrlProvider {
   private readonly secret: Buffer
   private readonly now: () => number
   private readonly debug?: (message: string) => void
+  private readonly trustedHosts: string[]
+  private readonly connection?: ConnectionFence
   private allowedHosts?: readonly string[]
   private expectedPort?: number
+  private skipPortCheck = false
   private active = false
 
   constructor(options: AudioRouteOptions) {
     this.root = resolve(options.outputDir)
     this.ttlMs = options.ttlMs ?? DEFAULT_URL_TTL_MS
-    this.secret = options.secret ?? randomBytes(32)
     this.now = options.now ?? Date.now
+    this.debug = options.debug
+    this.connection = options.connection
+    this.trustedHosts = (options.trustedHosts ?? [])
+      .map((host) => host.trim().toLowerCase())
+      .filter((host) => host.length > 0)
     this.allowedHosts = options.allowedHosts
     this.expectedPort = options.expectedPort
-    this.debug = options.debug
+    this.secret =
+      options.secret ??
+      loadOrCreateSecret(
+        options.secretPath ?? join(this.root, SECRET_FILE_NAME),
+        this.debug,
+      )
   }
 
   /** True once the host router accepted the route. */
@@ -151,9 +247,20 @@ export class AudioRoute implements AudioUrlProvider {
 
   /** Register on the DSH host router; the disposer unregisters and disables URLs. */
   register(server: HttpRouteRegistrar): () => void {
-    if (this.expectedPort === undefined) this.expectedPort = server.port
-    if (this.allowedHosts === undefined && server.host) {
-      this.allowedHosts = defaultAllowedHosts(server.host)
+    const remote = this.connection?.allowsRemoteAuthorities === true
+    if (this.trustedHosts.length > 0) {
+      // A configured whitelist implies a proxy that may rewrite the port.
+      this.allowedHosts = this.trustedHosts
+      this.skipPortCheck = true
+    } else if (remote && !isLoopbackHost(server.host)) {
+      this.allowedHosts = []
+      this.skipPortCheck = true
+      this.debug?.('audio route relaxed Host checks for remote authorities')
+    } else if (this.expectedPort === undefined) {
+      this.expectedPort = server.port
+      if (this.allowedHosts === undefined && server.host) {
+        this.allowedHosts = defaultAllowedHosts(server.host)
+      }
     }
 
     const dispose = server.register({
@@ -196,9 +303,22 @@ export class AudioRoute implements AudioUrlProvider {
       return
     }
 
-    const rejection = this.checkOrigin(req)
-    if (rejection !== undefined) {
-      this.debug?.(`audio route rejected: ${rejection}`)
+    const rejection = this.connection?.requestRejection?.({
+      headers: req.headers,
+    })
+    if (rejection === 401 || rejection === 403) {
+      this.debug?.(`audio route rejected by host connection: ${rejection}`)
+      sendText(
+        res,
+        rejection,
+        rejection === 401 ? 'Unauthorized' : 'Forbidden',
+      )
+      return
+    }
+
+    const originRejection = this.checkOrigin(req)
+    if (originRejection !== undefined) {
+      this.debug?.(`audio route rejected: ${originRejection}`)
       sendText(res, 403, 'Forbidden')
       return
     }
@@ -311,7 +431,7 @@ export class AudioRoute implements AudioUrlProvider {
       return `untrusted host ${hostname}`
     }
 
-    if (this.expectedPort !== undefined) {
+    if (this.expectedPort !== undefined && !this.skipPortCheck) {
       const port =
         parsed.port === ''
           ? parsed.protocol === 'https:'

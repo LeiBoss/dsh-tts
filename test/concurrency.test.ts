@@ -85,6 +85,49 @@ test('two identical concurrent requests spawn only once and share the path', asy
   })
 })
 
+test('cancelling one merged waiter leaves the other request alive', async () => {
+  await withTempDir(async (dir) => {
+    const pending: PendingSpawn[] = []
+    const limiter = new ConcurrencyLimiter({
+      maxConcurrent: 2,
+      queueSize: 4,
+      queueTimeoutMs: 1_000,
+    })
+    const config = resolveConfig({ outputDir: dir }, {})
+    const [generate] = createTtsTools(config, {
+      spawnImpl: controlledSpawn(pending),
+      limiter,
+    })
+    assert.ok(generate)
+
+    const first = new AbortController()
+    const second = new AbortController()
+    const a = generate.execute(
+      { text: 'cancel one waiter' },
+      executionContext(first.signal),
+    )
+    const b = generate.execute(
+      { text: 'cancel one waiter' },
+      executionContext(second.signal),
+    )
+
+    await waitFor(() => pending.length === 1)
+    first.abort()
+    await assert.rejects(a, (error: unknown) => {
+      assert.ok(error instanceof TtsError)
+      assert.equal(error.code, ErrorCode.Aborted)
+      return true
+    })
+    assert.equal(pending[0]?.child.kills.length, 0)
+    assert.deepEqual(limiter.stats, { running: 1, queued: 0 })
+
+    pending[0]?.complete()
+    const result = await b
+    assert.equal(result.format, 'mp3')
+    assert.equal(pending.length, 1)
+  })
+})
+
 test('a third distinct request waits when maxConcurrent is 2', async () => {
   await withTempDir(async (dir) => {
     const pending: PendingSpawn[] = []

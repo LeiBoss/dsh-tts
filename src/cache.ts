@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdir, stat } from 'node:fs/promises'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** Directory names this module owns: `YYYY-MM-DD`. */
@@ -40,9 +40,59 @@ export function outputFilePath(
 }
 
 /**
+ * Diagnostic record stored next to a finished MP3. It never participates in
+ * cache lookup; it only lets a later cache hit report which engine produced
+ * the file (for example `sapi` after a fallback).
+ */
+export interface CacheMetadata {
+  engine: string
+  voice: string
+  rate: string
+  pitch: string
+  volume: string
+  createdAt: string
+}
+
+/** Sidecar path for one audio file. */
+export function metadataPath(filePath: string): string {
+  return `${filePath}.json`
+}
+
+/** Best-effort metadata write; diagnostics must never fail synthesis. */
+export async function writeCacheMetadata(
+  filePath: string,
+  metadata: CacheMetadata,
+): Promise<void> {
+  try {
+    await writeFile(metadataPath(filePath), JSON.stringify(metadata), 'utf8')
+  } catch {
+    // The audio file is already valid; a missing sidecar only loses engine info.
+  }
+}
+
+/** Read a sidecar, treating missing, unreadable, or malformed data as absent. */
+export async function readCacheMetadata(
+  filePath: string,
+): Promise<CacheMetadata | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(metadataPath(filePath), 'utf8')) as {
+      engine?: unknown
+    }
+    if (typeof parsed !== 'object' || parsed === null) return undefined
+    if (typeof parsed.engine !== 'string' || parsed.engine.length === 0) {
+      return undefined
+    }
+    return parsed as CacheMetadata
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Find an existing non-empty file for `hash`, newest date bucket first. Only
  * files carrying the exact key prefix and a positive size qualify, so a
- * partial or unrelated file never satisfies the cache.
+ * partial or unrelated file never satisfies the cache. The `.mp3.json`
+ * sidecars and the `.audio-route-secret` file never match this filter.
  */
 export async function findCachedFile(
   outputDir: string,

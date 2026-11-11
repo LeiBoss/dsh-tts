@@ -7,6 +7,8 @@ export declare const ErrorCode: {
     readonly EmptyText: "EMPTY_TEXT";
     readonly InvalidVoice: "INVALID_VOICE";
     readonly InvalidRate: "INVALID_RATE";
+    readonly InvalidPitch: "INVALID_PITCH";
+    readonly InvalidVolume: "INVALID_VOLUME";
     readonly InvalidConfig: "INVALID_CONFIG";
     readonly DshHomeNotSet: "DSH_HOME_NOT_SET";
     readonly OutputDirNotWritable: "OUTPUT_DIR_NOT_WRITABLE";

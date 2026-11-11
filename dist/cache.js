@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 /** Directory names this module owns: `YYYY-MM-DD`. */
 const DATE_DIRECTORY = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,10 +29,39 @@ export function dateDirName(date = new Date()) {
 export function outputFilePath(outputDir, hash, date = new Date()) {
     return join(outputDir, dateDirName(date), `${hash}-${date.getTime()}.${AUDIO_FORMAT}`);
 }
+/** Sidecar path for one audio file. */
+export function metadataPath(filePath) {
+    return `${filePath}.json`;
+}
+/** Best-effort metadata write; diagnostics must never fail synthesis. */
+export async function writeCacheMetadata(filePath, metadata) {
+    try {
+        await writeFile(metadataPath(filePath), JSON.stringify(metadata), 'utf8');
+    }
+    catch {
+        // The audio file is already valid; a missing sidecar only loses engine info.
+    }
+}
+/** Read a sidecar, treating missing, unreadable, or malformed data as absent. */
+export async function readCacheMetadata(filePath) {
+    try {
+        const parsed = JSON.parse(await readFile(metadataPath(filePath), 'utf8'));
+        if (typeof parsed !== 'object' || parsed === null)
+            return undefined;
+        if (typeof parsed.engine !== 'string' || parsed.engine.length === 0) {
+            return undefined;
+        }
+        return parsed;
+    }
+    catch {
+        return undefined;
+    }
+}
 /**
  * Find an existing non-empty file for `hash`, newest date bucket first. Only
  * files carrying the exact key prefix and a positive size qualify, so a
- * partial or unrelated file never satisfies the cache.
+ * partial or unrelated file never satisfies the cache. The `.mp3.json`
+ * sidecars and the `.audio-route-secret` file never match this filter.
  */
 export async function findCachedFile(outputDir, hash) {
     let entries;
