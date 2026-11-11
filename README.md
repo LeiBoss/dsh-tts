@@ -33,7 +33,7 @@ npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与
 | `ctx.tools.register` | 注册 `tts_generate` 与 `tts_self_check`；注册随插件 fiber 注销，支持热更新 |
 | `ctx.inject(['webServer'])` | 可选依赖宿主 Web 路由；旧宿主回退 `ctx.get('httpServer')`，都不存在时只返回 `filePath` |
 | `webServer.register` | 注册 `prefix` 路由 `/dsh-tts/audio`，返回音频字节并处理 Range |
-| `ctx.connection.requestRejection` | 宿主 Host/Origin 与浏览器认证校验；不接 `admit`，保持链接可外发 |
+| `ctx.connection.requestRejection` | 宿主 Host/Origin 与浏览器会话校验；链接与当前 DSH 浏览器会话绑定，不带会话 cookie 的请求返回 401/403 |
 | `ctx.get('connection')` | 读取 `allowsRemoteAuthorities`，远程访问时放宽 Host 校验 |
 | DSH 配置层（`Config` + `apply` 的 config） | 读取 13 项配置；插件不自行读写 `cordis.patch.yml` |
 | `child_process.spawn` | 调用 `edge-tts`；降级时调用 `powershell.exe` 与 `ffmpeg` |
@@ -63,11 +63,11 @@ deciding whether to depend on this plugin.
 
 | 工具 | 参数 | 返回 | 何时调用 |
 | --- | --- | --- | --- |
-| `tts_generate` | `text`（必填）、`voice`、`rate`、`pitch`、`volume` | `{ filePath, format, browserUrl?, engine?, fallback?, text?, voice?, rate? }` | 用户要求把文字读出来、生成配音或音频文件时 |
+| `tts_generate` | `text`（必填）、`voice`、`rate`、`pitch`、`volume` | `{ filePath, format, browserUrl?, engine?, fallback?, text?, voice?, rate?, fallbackReason? }` | 用户要求把文字读出来、生成配音或音频文件时 |
 | `tts_self_check` | 无 | `{ edgeTtsAvailable, edgeTtsVersion?, spawnAllowed, outputDirWritable, dshHome, proxyConfigured, availableVoices }` | 安装后自检，或 `tts_generate` 报环境类错误时 |
 | `tts_probe_network` | `timeoutMs`（可选，默认 1500，上限 5000） | `{ host, port, reachable, elapsedMs, proxyConfigured }` | 怀疑网络到 Edge-TTS 端点不通时显式调用；会发起一次 TCP 连接，不合成音频、不消耗配额 |
 
-`tts_generate` 不播放音频、不转录音频、不克隆或修改音色、不做音频后处理，也不生成音乐。`filePath` 与 `format` 在正常合成时存在；当返回 `fallback: "speechSynthesis"` 时只返回 `text`、`voice`、`rate`，由调用方朗读。当前不提供音频时长。
+`tts_generate` 不播放音频、不转录音频、不克隆或修改音色、不做音频后处理，也不生成音乐。`filePath` 与 `format` 在正常合成时存在；当返回 `fallback: "speechSynthesis"` 时只返回 `text`、`voice`、`rate`，以及可选的 `fallbackReason`（各引擎失败原因摘要），由调用方朗读。当前不提供音频时长。
 
 默认值：`voice = zh-CN-XiaoxiaoNeural`，`rate = +0%`，`pitch = +0Hz`，`volume = +0%`。
 
@@ -177,14 +177,20 @@ npm run build
 }
 ```
 
-`browserUrl` 是同源相对地址，可在浏览器地址栏直接打开播放；它带有效期与签名。签名密钥持久化在输出目录的 `.audio-route-secret`，插件重载后旧链接仍可用；删除该文件会轮换全部链接。
+`browserUrl` 是同源相对地址，链接与当前 DSH 浏览器会话绑定：在浏览器里打开可以播放，但**不适合对外分享**。它带有效期与签名；签名密钥持久化在输出目录的 `.audio-route-secret`，插件重载后旧链接仍可用；删除该文件会轮换全部链接。需要分享时请直接发送音频文件。
 
-DSH Web 中，工具结果的 `render` 会在拿到宿主 `webServer.getOrigin()` 时把 `browserUrl` 拼成绝对地址，渲染为可点击的「▶ 播放」链接；JSON 返回值里的 `browserUrl` 仍是相对路径。拿不到 origin（例如 headless 或 `file://`）时不猜 `localhost`，退回相对 `Playback URL` 文本。
+DSH Web 中，工具结果的 `render` 会在拿到宿主 `webServer.getOrigin()` 时把 `browserUrl` 拼成绝对地址，输出 `[▶ 播放](...)`。**这是 Markdown 文本**：当前 DSH 的工具结果按纯文本展示，不会自动渲染成链接，需要用客户端播放器或在回复正文里重新引用该地址。JSON 返回值里的 `browserUrl` 仍是相对路径。拿不到 origin（例如 headless 或 `file://`）时不猜 `localhost`，退回相对 `Playback URL` 文本。
 
-当所有宿主引擎都不可用时，返回：
+当所有宿主引擎都不可用时，返回（`fallbackReason` 为各引擎失败原因摘要，见「错误码」）：
 
 ```json
-{ "fallback": "speechSynthesis", "text": "原文", "voice": "zh-CN-XiaoxiaoNeural", "rate": "+0%" }
+{
+  "fallback": "speechSynthesis",
+  "text": "原文",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "+0%",
+  "fallbackReason": "edge-tts: SYNTHESIS_TIMEOUT; sapi: ffmpeg exited with code -22"
+}
 ```
 
 ## 可用音色
@@ -250,7 +256,7 @@ loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessari
 
 - 从 GitHub 安装：`dsh plugin --profile web add github:leiboss/dsh-tts`，插件正常激活。
 - `tts_self_check`：`edgeTtsAvailable` / `spawnAllowed` / `outputDirWritable` 均为 `true`。
-- `tts_generate`：返回文件路径与 `[▶ 播放](http://127.0.0.1:3080/dsh-tts/audio/...)` 绝对链接；文件写入 `~/.dsh/tts-output/<date>/`。
+- `tts_generate`：返回文件路径与 `[▶ 播放](http://127.0.0.1:3080/dsh-tts/audio/...)` 文本（Markdown 未渲染，需在回复正文引用）；文件写入 `~/.dsh/tts-output/<date>/`。
 - 播放路由：无浏览器会话的 `curl` 返回 401（`connection.requestRejection` 生效，属预期行为），带会话的浏览器可正常取到音频。
 
 ### 未验证
@@ -297,8 +303,8 @@ npm run test:integration
 - **沙箱可能拒绝子进程**：报 `SPAWN_EPERM`，这是进程创建被策略拦截，不是文件不可写。缓解：调整 DSH 沙箱进程策略，或接受 `speechSynthesis` 标记由客户端朗读。
 - **`pitch`/`volume` 不参与缓存键**：相同文本、音色、语速的第二次调用会返回首次生成的文件，即使本次指定了不同的 pitch/volume。缓解：更换 `voice` 或 `rate`，或手动删除对应缓存文件。
 - **非 Windows 没有 SAPI 降级**：Linux/macOS 上会跳过 SAPI。缓解：保证 Edge-TTS 可用，或将 `speechSynthesis` 保留在降级链中。
-- **客户端播放入口缺失**：当前只返回 `browserUrl`，DSH Web 中可直接点击工具结果里的「▶ 播放」链接；宿主没有提供 origin 时仍需自行打开相对地址。缓解：后续迭代再提供内联 `<audio>` 播放器。
-- **来源校验交给宿主**：路由优先调用 `ctx.connection.requestRejection`（Host/Origin 与浏览器认证），失败时 401/403。为保留“链接可外发”，插件不接 `admit`，因此不带 DSH 会话 cookie 的 `curl` 直连会被拒绝；需要命令行验证时请从浏览器携带 Cookie。旧宿主没有 `connection` 时回退为内置 Host 端口 + `Origin`/`Host` 同源校验，并保留签名 token 作为第二道防线。
+- **客户端内联播放器未提供**：DSH 的工具结果按纯文本展示，`render` 里的 `[▶ 播放](...)` 不会自动渲染为链接，也拿不到工具返回值来挂载 `<audio>` 控件。缓解：在回复正文里重新引用 `browserUrl`，或直接使用返回的 `filePath`；后续需要宿主提供工具结果插槽或音频内容块才能内联播放。
+- **来源校验交给宿主**：路由优先调用 `ctx.connection.requestRejection`（Host/Origin + 浏览器会话校验）。链接与当前 DSH 浏览器会话绑定：不带会话 cookie 的请求（包括 `curl`）会返回 401/403，因此不要把 `browserUrl` 当作可对外分享的公开链接，需要分享时请直接发送音频文件。旧宿主没有 `connection` 时回退为内置 Host 端口 + `Origin`/`Host` 同源校验，并保留签名 token 作为第二道防线。
 - **反向代理需要 `trustedHosts`**：代理常改端口，配置 `trustedHosts` 后跳过端口钉死；留空则要求 Host 端口与监听端口一致。
 - **签名密钥可轮换**：密钥存于 `<outputDir>/.audio-route-secret`，删除即让已发出的全部链接失效；文件读取/写入失败时回退内存密钥并只影响本次进程。
 - **分块是字节拼接**：MP3 直接按字节拼接，不重新编码。缓解：长文本仍产出一个可播放文件；若播放器兼容性异常，可关闭分块或改用外部工具后处理。
@@ -327,7 +333,7 @@ npm run test:integration
 | `ABORTED` | 调用被取消 | 无需处理；调用方已取消 |
 | `TTS_BUSY` | 队列满或排队超时 | 稍后重试，或增大 `maxConcurrent` / `queueSize` / `queueTimeoutMs` |
 | `ALL_FALLBACKS_FAILED` | 降级链全部失败且链中无 `speechSynthesis` | 恢复 Edge-TTS，或把 `speechSynthesis` 加入 `fallbackOrder` |
-| `SPEECH_SYNTHESIS_REQUIRED` | 宿主无法产出音频，返回 `fallback: "speechSynthesis"` | 由调用方朗读返回的 `text`；如需文件请安装/修复 edge-tts 后重试 |
+| `SPEECH_SYNTHESIS_REQUIRED` | 宿主无法产出音频，返回 `fallback: "speechSynthesis"` | 由调用方朗读返回的 `text`；`fallbackReason` 给出各引擎失败原因，如需文件请安装/修复 edge-tts 后重试 |
 
 ## 开发与测试
 

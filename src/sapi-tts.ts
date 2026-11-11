@@ -142,6 +142,8 @@ export async function synthesizeSapi(
         'libmp3lame',
         '-q:a',
         '4',
+        '-f',
+        'mp3',
         partialPath,
       ],
       {

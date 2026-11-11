@@ -54,6 +54,23 @@ function canonicalAudio(audio, audioRoute, engine) {
         ...(engine === undefined ? {} : { engine }),
     };
 }
+/**
+ * Condense per-engine failures for the `speechSynthesis` fallback. Absolute
+ * paths are stripped and each reason is truncated: the field is user-visible
+ * and must never leak temp paths, tokens or the source text.
+ */
+function summarizeAttempts(attempts) {
+    return attempts
+        .map((attempt) => {
+        const reason = attempt.reason
+            .replace(/(?:[A-Za-z]:[\\/]|\/)[^\s'"`;:]+/g, '[path]')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const clipped = reason.length > 160 ? `${reason.slice(0, 157)}...` : reason;
+        return `${attempt.engine}: ${clipped}`;
+    })
+        .join('; ');
+}
 function requireText(text) {
     if (text.trim().length === 0) {
         throw new TtsError(ErrorCode.EmptyText, '`text` must be a non-empty string.', 'Pass the text that should be spoken; whitespace-only input is rejected.');
@@ -158,7 +175,13 @@ export function createTtsTools(config, deps = {}) {
     };
     const renderOutcome = (outcome, speech) => {
         if (outcome.kind === 'speechSynthesis') {
-            return { fallback: 'speechSynthesis', ...speech };
+            return {
+                fallback: 'speechSynthesis',
+                ...speech,
+                ...(outcome.reason === undefined
+                    ? {}
+                    : { fallbackReason: outcome.reason }),
+            };
         }
         return canonicalAudio(outcome.audio, deps.audioRoute, outcome.engine);
     };
@@ -169,7 +192,10 @@ export function createTtsTools(config, deps = {}) {
      */
     const renderGeneratedAudio = (value) => {
         if (value.fallback === 'speechSynthesis') {
-            return `${ErrorCode.SpeechSynthesisRequired}: satisfied without a host audio file. Read the returned text with the browser speechSynthesis API. If a file was expected, install or repair edge-tts and retry.`;
+            const base = `${ErrorCode.SpeechSynthesisRequired}: satisfied without a host audio file. Read the returned text with the browser speechSynthesis API. If a file was expected, install or repair edge-tts and retry.`;
+            return value.fallbackReason === undefined
+                ? base
+                : `${base}\nReason: ${value.fallbackReason}`;
         }
         const filePath = value.filePath ?? '';
         const format = value.format ?? '';
@@ -251,6 +277,10 @@ export function createTtsTools(config, deps = {}) {
                     rate: {
                         type: 'string',
                         description: 'Effective rate, returned only when `fallback` is `speechSynthesis`.',
+                    },
+                    fallbackReason: {
+                        type: 'string',
+                        description: 'Condensed per-engine failure summary, returned only when `fallback` is `speechSynthesis`. Contains engine names, error codes and truncated stderr; never user text, tokens or absolute paths.',
                     },
                 },
                 additionalProperties: false,
@@ -363,7 +393,10 @@ export function createTtsTools(config, deps = {}) {
                     });
                     deps.log?.(`fallback engine=${outcome.engine} elapsedMs=${Date.now() - started}`);
                     if (outcome.kind === 'speechSynthesis') {
-                        return { kind: 'speechSynthesis' };
+                        return {
+                            kind: 'speechSynthesis',
+                            reason: summarizeAttempts(outcome.attempts),
+                        };
                     }
                     await recordMetadata(outcome.audio, outcome.engine, settings);
                     return {
