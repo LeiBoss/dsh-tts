@@ -2,6 +2,7 @@
 
 npm 包名为 `@leiboss/dsh-tts`；npm 上的裸名 `dsh-tts` 属于他人，与本项目无关。
 
+[![npm](https://img.shields.io/npm/v/@leiboss/dsh-tts.svg)](https://www.npmjs.com/package/@leiboss/dsh-tts)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![CI](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml/badge.svg)](https://github.com/leiboss/dsh-tts/actions/workflows/ci.yml)
 
