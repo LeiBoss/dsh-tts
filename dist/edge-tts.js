@@ -81,7 +81,7 @@ export function runProcess(command, args, options) {
             settle(code, exitSignal);
         });
         timer = setTimeout(() => {
-            fail(new TtsError(ErrorCode.SynthesisTimeout, `Edge-TTS did not finish within ${options.timeoutMs} ms.`, 'Increase `timeoutMs` or check network connectivity to the Edge-TTS service.'));
+            fail(new TtsError(ErrorCode.SynthesisTimeout, `Edge-TTS did not finish within ${options.timeoutMs} ms.`, 'Increase `timeoutMs` or check network connectivity to the Edge-TTS service. 若网络正常但持续超时，请检查是否需要对 speech.platform.bing.com:443 配置代理。注意：环境变量 HTTPS_PROXY 对 edge-tts 的 WSS 连接无效，必须通过本插件的 `proxy` 配置项透传 `--proxy` 参数。详见 README 的「已知限制」章节。'));
             stop();
         }, options.timeoutMs);
         if (signal) {
@@ -120,6 +120,7 @@ export async function synthesize(text, options) {
         `--rate=${options.rate}`,
         ...(options.pitch === undefined ? [] : [`--pitch=${options.pitch}`]),
         ...(options.volume === undefined ? [] : [`--volume=${options.volume}`]),
+        ...(options.proxy === undefined ? [] : [`--proxy=${options.proxy}`]),
         `--write-media=${partialPath}`,
     ];
     try {
@@ -131,7 +132,7 @@ export async function synthesize(text, options) {
         if (result.code !== 0) {
             const status = result.code === null ? 'null' : String(result.code);
             const signal = result.signal ? ` (signal ${result.signal})` : '';
-            throw new TtsError(ErrorCode.EdgeTtsFailed, `Edge-TTS exited with code ${status}${signal}.${stderrSuffix(result.stderr)}`, 'Check the voice and rate values and network connectivity, then run `tts_self_check`.');
+            throw new TtsError(ErrorCode.EdgeTtsFailed, `Edge-TTS exited with code ${status}${signal}.${stderrSuffix(result.stderr)}`, 'Check the voice and rate values and network connectivity, then run `tts_self_check`. 若网络正常但持续超时，请检查是否需要对 speech.platform.bing.com:443 配置代理。注意：环境变量 HTTPS_PROXY 对 edge-tts 的 WSS 连接无效，必须通过本插件的 `proxy` 配置项透传 `--proxy` 参数。详见 README 的「已知限制」章节。');
         }
         const info = await stat(partialPath).catch(() => undefined);
         if (!info?.isFile() || info.size === 0) {

@@ -46,6 +46,7 @@ export async function synthesizeChunked(text, options) {
         rate: options.rate,
         pitch: options.pitch,
         volume: options.volume,
+        proxy: options.proxy,
         binary: options.binary,
         timeoutMs: options.timeoutMs,
         signal: options.signal,

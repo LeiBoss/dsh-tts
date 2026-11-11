@@ -181,7 +181,7 @@ test('apply -> dispose -> apply re-registers tools and route cleanly', async () 
     const fake = makeContext()
 
     apply(fake.ctx as never, { outputDir: dir })
-    assert.equal(fake.tools.size, 2)
+    assert.equal(fake.tools.size, 3)
     assert.equal(fake.routes.size, 1)
     assert.ok(fake.routes.has(AUDIO_ROUTE_PREFIX))
 
@@ -190,7 +190,7 @@ test('apply -> dispose -> apply re-registers tools and route cleanly', async () 
     assert.equal(fake.routes.size, 0)
 
     apply(fake.ctx as never, { outputDir: dir })
-    assert.equal(fake.tools.size, 2)
+    assert.equal(fake.tools.size, 3)
     assert.equal(fake.routes.size, 1)
   })
 })

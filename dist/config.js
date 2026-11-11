@@ -56,6 +56,7 @@ export const Config = z.object({
     queueTimeoutMs: z.number().default(DEFAULT_QUEUE_TIMEOUT_MS),
     totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
     trustedHosts: z.array(z.string()).default([...DEFAULT_TRUSTED_HOSTS]),
+    proxy: z.string(),
 });
 function nonEmpty(value) {
     const trimmed = value?.trim();
@@ -93,6 +94,7 @@ export function resolveConfig(raw, env = process.env) {
         trustedHosts: (raw?.trustedHosts ?? [...DEFAULT_TRUSTED_HOSTS])
             .map((host) => host.trim().toLowerCase())
             .filter((host) => host.length > 0),
+        proxy: nonEmpty(raw?.proxy),
     };
 }
 /**
@@ -135,6 +137,7 @@ export function requireSynthesisConfig(config) {
         queueTimeoutMs: config.queueTimeoutMs,
         totalTimeoutMs: config.totalTimeoutMs,
         trustedHosts: config.trustedHosts,
+        proxy: config.proxy,
     };
 }
 //# sourceMappingURL=config.js.map

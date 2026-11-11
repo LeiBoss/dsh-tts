@@ -45,6 +45,11 @@ export interface SynthesizeOptions {
     pitch?: string;
     /** Volume adjustment such as `-10%`; omitted for Edge-TTS's own default. */
     volume?: string;
+    /**
+     * HTTP proxy for the WSS connection, forwarded as `--proxy`. Edge-TTS does
+     * not honour `HTTPS_PROXY`, so this is the only way to route it.
+     */
+    proxy?: string;
     binary: string;
     outputDir: string;
     /** Stable cache key; also names the output file. */

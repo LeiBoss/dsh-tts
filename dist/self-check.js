@@ -66,6 +66,7 @@ export async function selfCheck(options) {
         spawnAllowed,
         outputDirWritable,
         dshHome: config.dshHome,
+        proxyConfigured: config.proxy !== undefined,
     };
 }
 //# sourceMappingURL=self-check.js.map

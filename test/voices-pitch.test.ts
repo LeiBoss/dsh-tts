@@ -12,6 +12,8 @@ import { AVAILABLE_VOICES, VOICES } from '../src/voices.ts'
 import {
   FakeChild,
   executionContext,
+  failingSpawn,
+  hangingSpawn,
   successfulSpawn,
   type SpawnRecord,
 } from './helpers.ts'
@@ -229,6 +231,104 @@ test('chunked synthesis forwards pitch and volume to every chunk', async () => {
       bytes.length,
       calls.length * Buffer.byteLength('ID3fake-mp3-bytes'),
       'chunks must be concatenated into one file',
+    )
+  })
+})
+
+test('a configured proxy is forwarded as --proxy', async () => {
+  await withTempDir(async (dir) => {
+    const calls: SpawnRecord[] = []
+    const { generate } = setup(dir, successfulSpawn(calls), {
+      proxy: 'http://127.0.0.1:7890',
+    })
+
+    await generate.execute({ text: 'proxy on' }, executionContext())
+
+    assert.ok(
+      calls[0]?.args.includes('--proxy=http://127.0.0.1:7890'),
+      'edge-tts only honours --proxy; env vars are ignored for WSS',
+    )
+  })
+})
+
+test('without a proxy no --proxy argument is added', async () => {
+  await withTempDir(async (dir) => {
+    const calls: SpawnRecord[] = []
+    const { generate } = setup(dir, successfulSpawn(calls))
+
+    await generate.execute({ text: 'proxy off' }, executionContext())
+
+    assert.equal(
+      calls[0]?.args.some((arg) => arg.startsWith('--proxy=')),
+      false,
+    )
+  })
+})
+
+test('chunked synthesis forwards the proxy to every chunk', async () => {
+  await withTempDir(async (dir) => {
+    const calls: SpawnRecord[] = []
+    const text =
+      '第一句话需要足够长。第二句话也需要足够长。第三句话同样需要足够长。第四句话仍然需要足够长。'
+    const { generate } = setup(dir, successfulSpawn(calls), {
+      chunkSize: 20,
+      proxy: 'http://127.0.0.1:7890',
+    })
+
+    await generate.execute({ text }, executionContext())
+
+    assert.ok(calls.length >= 2)
+    for (const call of calls) {
+      assert.ok(call.args.includes('--proxy=http://127.0.0.1:7890'))
+    }
+  })
+})
+
+test('tts_self_check reports proxyConfigured without probing the network', async () => {
+  await withTempDir(async (dir) => {
+    const { check } = setup(dir, successfulSpawn([]), {
+      proxy: 'http://127.0.0.1:7890',
+    })
+    const configured = await check.execute({}, executionContext())
+    assert.equal(configured.proxyConfigured, true)
+    assert.equal('endpointReachable' in configured, false)
+
+    const plain = setup(dir, successfulSpawn([]))
+    const unconfigured = await plain.check.execute({}, executionContext())
+    assert.equal(unconfigured.proxyConfigured, false)
+  })
+})
+
+test('timeout and upstream failures suggest checking the proxy', async () => {
+  await withTempDir(async (dir) => {
+    const hanging = hangingSpawn([])
+    const slow = setup(dir, hanging.spawn, {
+      timeoutMs: 20,
+      fallbackEnabled: false,
+    })
+    await assert.rejects(
+      slow.generate.execute({ text: 'timeout hint' }, executionContext()),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, ErrorCode.SynthesisTimeout)
+        const suggestion = String((error as { suggestion?: string }).suggestion)
+        assert.match(suggestion, /speech\.platform\.bing\.com/)
+        assert.match(suggestion, /--proxy/)
+        return true
+      },
+    )
+
+    const failing = setup(dir, failingSpawn([], 2, 'connection reset'), {
+      fallbackEnabled: false,
+    })
+    await assert.rejects(
+      failing.generate.execute({ text: 'upstream hint' }, executionContext()),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, ErrorCode.EdgeTtsFailed)
+        const suggestion = String((error as { suggestion?: string }).suggestion)
+        assert.match(suggestion, /speech\.platform\.bing\.com/)
+        assert.match(suggestion, /--proxy/)
+        return true
+      },
     )
   })
 })

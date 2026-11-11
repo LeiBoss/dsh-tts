@@ -30,6 +30,8 @@ export interface ChunkedSynthesisOptions {
   pitch?: string
   /** Applied uniformly to every chunk. */
   volume?: string
+  /** Forwarded to every chunk subprocess as `--proxy`. */
+  proxy?: string
   binary: string
   outputDir: string
   /** Cache key of the full original text. */
@@ -105,6 +107,7 @@ export async function synthesizeChunked(
     rate: options.rate,
     pitch: options.pitch,
     volume: options.volume,
+    proxy: options.proxy,
     binary: options.binary,
     timeoutMs: options.timeoutMs,
     signal: options.signal,

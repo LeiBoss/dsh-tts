@@ -283,7 +283,7 @@ test('apply falls back to ctx.get("httpServer") when webServer is absent', async
     apply(ctx as never, { outputDir: dir })
 
     assert.equal(injected, false)
-    assert.equal(tools.length, 2)
+    assert.equal(tools.length, 3)
     assert.equal(server.routes.length, 1)
     assert.equal(effects.length, 1)
   } finally {

@@ -40,6 +40,7 @@ import { ErrorCode, TtsError } from './errors.ts'
 import { isFallbackEligible, runFallback } from './fallback.ts'
 import type { SapiOptions } from './sapi-tts.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
+import { probeEndpoint, type ProbeConnector } from './probe.ts'
 import { AVAILABLE_VOICES } from './voices.ts'
 
 export { Config } from './config.ts'
@@ -108,6 +109,8 @@ export interface TtsDependencies {
   limiter?: ConcurrencyLimiter
   /** Debug sink for fallback timing; never receives call arguments. */
   log?: (message: string) => void
+  /** Injected TCP connector for `tts_probe_network`; tests use a local server. */
+  probeConnect?: ProbeConnector
 }
 
 /**
@@ -225,6 +228,15 @@ function selfCheckDescription(): string {
     'Diagnose the local TTS runtime without synthesizing audio.',
     'Reports whether the edge-tts binary is available, whether the DSH sandbox permits creating the subprocess, and whether the output directory is writable.',
     'Call this after installation, or when tts_generate fails with EDGE_TTS_NOT_FOUND, SPAWN_EPERM, or OUTPUT_DIR_NOT_WRITABLE.',
+  ].join(' ')
+}
+
+function probeDescription(): string {
+  return [
+    'Network diagnostic only: opens one TCP connection to speech.platform.bing.com:443 (1.5 s timeout by default, 5 s maximum) and reports whether it is reachable.',
+    'It does not synthesize audio, does not send a WebSocket handshake, and does not consume Edge-TTS quota.',
+    'The probe always connects directly, even when a proxy is configured; a false result can simply mean the machine needs a proxy. In that case check the `proxy` config instead of assuming the plugin is broken.',
+    'tts_self_check stays fully offline; call this tool only when you need to test connectivity.',
   ].join(' ')
 }
 
@@ -507,6 +519,7 @@ export function createTtsTools(
                 rate,
                 pitch,
                 volume,
+                proxy: config.proxy,
                 binary: config.edgeTtsBinary,
                 outputDir,
                 hash,
@@ -523,6 +536,7 @@ export function createTtsTools(
                 rate,
                 pitch,
                 volume,
+                proxy: config.proxy,
                 binary: config.edgeTtsBinary,
                 outputDir,
                 hash,
@@ -635,6 +649,12 @@ export function createTtsTools(
             required: true,
             description: 'Value of DSH_HOME, or an empty string when unset.',
           },
+          proxyConfigured: {
+            type: 'boolean',
+            required: true,
+            description:
+              'Whether a proxy is configured for Edge-TTS. Connectivity is not tested; call tts_probe_network for that.',
+          },
           availableVoices: {
             type: 'array',
             items: { type: 'string' },
@@ -659,7 +679,64 @@ export function createTtsTools(
     },
   })
 
-  return [generate, check]
+  const probe = defineTool({
+    name: 'tts_probe_network',
+    description: probeDescription(),
+    parameters: {
+      timeoutMs: {
+        type: 'number',
+        description:
+          'TCP connect timeout in milliseconds. Defaults to 1500; values are clamped to 1..5000.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          host: {
+            type: 'string',
+            required: true,
+            description: 'Probed host; always speech.platform.bing.com.',
+          },
+          port: {
+            type: 'number',
+            required: true,
+            description: 'Probed TCP port; always 443.',
+          },
+          reachable: {
+            type: 'boolean',
+            required: true,
+            description: 'Whether the TCP connection completed before the timeout.',
+          },
+          elapsedMs: {
+            type: 'number',
+            required: true,
+            description: 'Wall-clock time spent on the probe, in milliseconds.',
+          },
+          proxyConfigured: {
+            type: 'boolean',
+            required: true,
+            description:
+              'Whether a proxy is configured. The probe itself always connects directly.',
+          },
+        },
+        additionalProperties: false,
+      },
+      render: (_args, value) => [
+        { type: 'text' as const, text: JSON.stringify(value, null, 2) },
+      ],
+    },
+    async execute(args, exec) {
+      const result = await probeEndpoint({
+        timeoutMs: args.timeoutMs,
+        signal: exec.signal,
+        connectImpl: deps.probeConnect,
+      })
+      return { ...result, proxyConfigured: config.proxy !== undefined }
+    },
+  })
+
+  return [generate, check, probe]
 }
 
 /**
