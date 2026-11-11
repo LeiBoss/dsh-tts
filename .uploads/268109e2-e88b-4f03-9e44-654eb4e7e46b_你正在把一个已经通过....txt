@@ -1,0 +1,442 @@
+你正在把一个已经通过验收、准备发布的 DSH TTS 插件（`dsh-tts`）从“功能型 TTS 插件”
+重新定位为“面向插件作者的可靠 TTS 后端”。仓库：github.com/leiboss/dsh-tts
+
+## 1. 本次任务的性质与边界
+
+**这是一次定位显式化，不是功能开发。**
+
+插件当前状态：核心合成、Web 音频路由、长文本分块、降级链、并发控制、
+HMR 安全、分层错误码、测试均已就位并通过验收。MIT 许可证和 package.json
+元数据已配置。
+
+本次任务的全部产出是：**文案、README 结构、Provider 契约导出、发布动作**。
+目的是让“需要可靠 TTS 后端的其他插件作者”能一眼认出这个插件，并知道
+“它可以被依赖、依赖时能获得什么保证”。
+
+### 绝对禁止
+
+- 不新增任何 TTS 引擎。不实现 Piper、OpenAI、豆包、通义千问等多 Provider 路由。
+- 不实现客户端播放器、内联 `<audio>`、自动朗读开关、悬浮条。
+- 不修改 `tts_generate` / `tts_self_check` 的参数 schema、返回 schema、错误码语义。
+- 不修改缓存键构成，不修改分块逻辑，不修改降级链顺序，不修改并发控制参数。
+- 不删除或改写任何现有测试断言。
+- 不为了“看起来更完整”而创建 CHANGELOG、CONTRIBUTING、CODE_OF_CONDUCT。
+- 不在 README 中添加徽章墙、截图、GIF、Star History、赞助按钮。
+
+### 允许修改的范围
+
+- `package.json` 的 `description`、`keywords`、`exports`（仅增量添加 `./provider`）。
+- `README.md`（顶部视觉区、新增两个小节、调整定位措辞）。
+- `src/provider.ts`（新增或整理，仅导出类型契约）。
+- `src/index.ts`（仅在需要 re-export provider 类型时做最小改动）。
+- `cordis.patch.yml`、`test/`、`src/edge-tts.ts`、`src/cache.ts`、`src/chunker.ts`、
+  `src/fallback.ts`、`src/audio-route.ts`、`src/self-check.ts` **一律不动**。
+
+## 2. 阶段 A：package.json 定位文案
+
+### 2.1 修改 description
+
+将 `description` 改为“基础设施语气”，强调“可被依赖的后端”而非“功能列表”：
+
+```json
+"description": "Reliable TTS infrastructure for DSH plugin authors: concurrency-safe synthesis, layered error semantics, chunked long-text, and provider fallback. Returns playable audio with browser-accessible URLs."
+```
+
+要求：
+- 以 `Reliable TTS infrastructure for DSH plugin authors` 开头。
+- 包含 `concurrency-safe`、`layered error semantics`、`provider fallback` 三个关键词。
+- 以句号结尾，一句话，不超过 220 字符。
+
+### 2.2 扩充 keywords
+
+在现有 `keywords` 数组中追加以下词（保留已有词，不删除）：
+
+```json
+"tts-backend",
+"tts-provider",
+"voice-infrastructure",
+"plugin-infrastructure"
+```
+
+`dsh-plugin` 和 `tts` 必须保留。追加后数组总长度不超过 12 个。
+
+### 2.3 硬约束
+
+- 不改 `name`、`version`、`license`、`repository`、`homepage`、`bugs`、`engines`、
+  `dependencies`、`peerDependencies`、`scripts`、`files`、`dsh` 字段。
+- `exports` 字段在阶段 D 处理，本阶段不动。
+- 不修改 `version`。定位调整不构成版本变更，发布时再决定是否升 patch。
+
+### 2.4 验证
+
+```bash
+node -e "const p=require('./package.json'); console.log(p.description); console.log(p.keywords.join(','))"
+```
+
+期望：description 以 `Reliable TTS infrastructure` 开头；
+keywords 包含 `dsh-plugin`、`tts`、`tts-backend`、`tts-provider`。
+
+## 3. 阶段 B：README 顶部视觉区重写
+
+### 3.1 目标
+
+把 README 第一屏从“功能描述”改为“写给两类读者的两句话”，主动区分
+“插件作者”和“终端用户”，避免终端用户误以为这是一个朗读产品。
+
+### 3.2 替换 README 一级标题下方的引用块
+
+找到当前 README 中 `# dsh-tts` 下方、徽章下方的 `>` 引用块（一句话价值描述），
+整段替换为：
+
+```markdown
+> **For plugin authors:** a reliable TTS backend with concurrency control, layered
+> error codes, and provider fallback — designed to be depended on, not just clicked.
+>
+> **For end users:** returns playable audio files with browser-accessible URLs.
+> Bring your own player, or use a reader plugin that calls this backend.
+```
+
+要求：
+- 两段引用块之间保留一个空行，渲染为两个独立段落。
+- `For plugin authors` 在前，`For end users` 在后。顺序不能反。
+- 不加第三段。不加“Why choose us”之类的文案。
+
+### 3.3 保留徽章和安装命令
+
+顶部视觉区的 MIT 徽章、npm 版本徽章、`**Install:**` 行**保持不变**。
+如果 npm 尚未发布，npm 徽章不存在——不要在本阶段补一个会 404 的徽章。
+
+### 3.4 硬约束
+
+- 不改 README 的章节结构、配置表、错误码表、已知限制。
+- 不改一级标题 `# dsh-tts`。
+- 不在顶部视觉区添加截图、GIF、目录、Roadmap。
+
+### 3.5 验证
+
+打开 README，确认第一屏依次出现：一级标题、徽章（如有）、两段引用块、
+安装命令。引用块中 `For plugin authors` 在前。
+
+## 4. 阶段 C：README 新增 “Reliability semantics” 小节
+
+### 4.1 位置
+
+插入在现有 “How it works”（工作原理 / 能力接缝表格）小节之后、
+“Tools”（工具一览）小节之前。如果这两个小节的实际标题是中文或英文，
+以仓库当前 README 的实际标题为准，但新小节标题固定为英文
+`## Reliability semantics`。
+
+### 4.2 内容
+
+整节内容如下（表格中的行为描述必须与代码实际行为一致；如果某项行为
+在代码中不存在，删除该行，不要编造）：
+
+```markdown
+## Reliability semantics
+
+This plugin is designed to be called by other plugins and agents, not just by
+end users. The following behaviors are part of its contract:
+
+| Behavior | Guarantee | Error code / field |
+|---|---|---|
+| Concurrency | At most `maxConcurrent` synthesis tasks run simultaneously; excess requests queue up to `queueSize`, then fail fast | `TTS_BUSY` (includes current running count and queue length) |
+| Sandbox rejection | `spawn` blocked by the sandbox is distinguished from upstream failure | `SPAWN_EPERM` (points to sandbox policy, not filesystem) |
+| Upstream failure | Edge-TTS non-zero exit or network timeout | `EDGE_TTS_FAILED` / `SYNTHESIS_TIMEOUT` |
+| Fallback | On Edge-TTS failure, tries engines in `fallbackOrder`; the response marks the engine actually used | `engine` / `fallback` fields |
+| Cache semantics | Cache key is fixed to `(text, voice, rate)`; `pitch`/`volume` are excluded for predictable cache behavior | See “Known limitations” |
+| Lifecycle | Tools, routes, and config listeners are effect-registered and cleaned up on dispose; HMR-safe | — |
+
+These are not feature claims. They are behaviors callers can rely on when
+deciding whether to depend on this plugin.
+```
+
+### 4.3 硬约束
+
+- 表格中每一行的“行为”必须在代码中真实存在。如果代码中 `maxConcurrent`
+  的实际默认值或队列行为与描述不符，**以代码为准修改表格**，不要反过来改代码。
+- 不在这节里展开“如何使用”或“配置详情”，那些留在后面的章节。
+- 不添加“Why this matters”之类的解释段落。表格 + 最后一句声明即可。
+- 如果 README 整体是中文，这一节仍用英文标题和英文表格（与 DSH 生态
+  的能力接缝表格惯例一致），最后一句声明可以用中文。
+
+### 4.4 验证
+
+```bash
+grep -n "Reliability semantics" README.md
+grep -n "TTS_BUSY" README.md
+grep -n "SPAWN_EPERM" README.md
+```
+
+期望：`Reliability semantics` 出现在 “How it works” 之后、“Tools” 之前；
+`TTS_BUSY` 和 `SPAWN_EPERM` 在该节的表格中出现。
+
+## 5. 阶段 D：导出 TTSProvider 契约（唯一允许改代码的阶段）
+
+### 5.1 前置判断
+
+打开 `src/`，检查是否已经存在 `TTSProvider` 接口或等价的 provider 抽象。
+
+- **已存在**：跳到 5.3，只做导出整理。
+- **不存在**：执行 5.2。
+
+### 5.2 抽取最小公开契约到 `src/provider.ts`
+
+新建 `src/provider.ts`，内容为**纯类型定义**，不含任何实现：
+
+```typescript
+export interface TTSProvider {
+  readonly name: string
+  isAvailable(): Promise<boolean>
+  synthesize(text: string, options: SynthesizeOptions): Promise<SynthesizeResult>
+}
+
+export interface SynthesizeOptions {
+  voice?: string
+  rate?: string
+  pitch?: string
+  volume?: string
+  signal?: AbortSignal
+}
+
+export interface SynthesizeResult {
+  filePath: string
+  format: string
+  durationMs?: number
+  browserUrl?: string
+  engine: string
+}
+```
+
+要求：
+- 文件只包含 `export interface`，不 import 任何运行时依赖。
+- 字段与现有 `tts_generate` 的实际返回结构一致。如果实际返回中有额外字段
+  （如 `fallback`），在 `SynthesizeResult` 中补上可选字段。
+- 不把现有的 Edge-TTS 实现类搬进这个文件。这个文件是**契约**，不是实现。
+
+### 5.3 在 `src/index.ts` 中 re-export 类型
+
+在 `src/index.ts` 顶部或底部添加（不改变现有逻辑）：
+
+```typescript
+export type { TTSProvider, SynthesizeOptions, SynthesizeResult } from './provider.js'
+```
+
+要求：
+- 只导出类型，不导出值。
+- 不改动 `name`、`inject`、`apply` 的现有代码。
+- 如果 `src/index.ts` 已经有类型导出块，把上述类型追加进去，不要新建重复的 export 块。
+
+### 5.4 更新 `package.json` 的 exports
+
+将 `exports` 从单入口改为双入口：
+
+```json
+"exports": {
+  ".": "./dist/index.js",
+  "./provider": "./dist/provider.js"
+}
+```
+
+要求：
+- `"."` 的现有值保持不变。
+- 新增 `"./provider"` 指向编译产物 `./dist/provider.js`。
+- 不修改 `"main"` 字段。
+- 确认 `tsconfig.json` 的编译产物路径能生成 `dist/provider.js`（如果 `src/provider.ts`
+  只有类型定义，TypeScript 可能生成空文件或 `.d.ts`——这没问题，类型导入
+  只需要 `.d.ts` 存在）。
+
+### 5.5 硬约束
+
+- `src/provider.ts` 不得包含任何运行时逻辑、函数实现、常量。
+- 不得修改 `src/edge-tts.ts`、`src/cache.ts`、`src/chunker.ts`、`src/fallback.ts`、
+  `src/audio-route.ts`、`src/self-check.ts`。
+- 不得修改 `tts_generate` 或 `tts_self_check` 的注册代码。
+- 不得为了让 `dist/provider.js` 有内容而往 `provider.ts` 里塞实现。
+
+### 5.6 验证
+
+```bash
+npm run build
+ls dist/provider.js dist/provider.d.ts 2>/dev/null || ls dist/provider.d.ts
+node -e "const p=require('./package.json'); console.log(JSON.stringify(p.exports))"
+npm test
+```
+
+期望：
+- `dist/provider.d.ts` 存在（`.js` 可能为空，可接受）。
+- `exports` 包含 `"./provider": "./dist/provider.js"`。
+- `npm test` 全部通过，测试数量与改动前一致。
+
+## 6. 阶段 E：README 新增 “For plugin authors” 集成指南
+
+### 6.1 位置
+
+插入在现有 “Usage”（使用）小节之后、“Verification”（验证）小节之前。
+新小节标题固定为英文 `## For plugin authors`。
+
+### 6.2 内容
+
+```markdown
+## For plugin authors
+
+If you are building a reader plugin, a notification plugin, or an agent that needs
+reliable audio synthesis, you can call `tts_generate` as a tool, or depend on the
+`TTSProvider` interface directly.
+
+**Option A: call the tool** (recommended for agents)
+
+```typescript
+const result = await ctx.tools.call('tts_generate', {
+  text: 'Build completed',
+  voice: 'zh-CN-YunxiNeural',
+})
+// result: { filePath, format, browserUrl?, engine?, fallback? }
+```
+
+**Option B: import the provider** (for plugins that want to own the playback UX)
+
+```typescript
+import type { TTSProvider, SynthesizeResult } from 'dsh-tts/provider'
+
+// Resolve a provider instance from the DSH service registry,
+// or construct the Edge-TTS provider directly if you are embedding it.
+```
+
+**Error handling contract**
+
+Treat these error codes differently — the distinction is the point:
+
+| Code | Meaning | Recommended handling |
+|---|---|---|
+| `TTS_BUSY` | Concurrency limit or queue full | Retry after a short delay |
+| `SPAWN_EPERM` | Sandbox blocked subprocess creation | Surface to user as environment issue; do not retry |
+| `EDGE_TTS_FAILED` | Upstream Edge-TTS failure | Trigger your own fallback, or rely on this plugin's fallback chain |
+| `SYNTHESIS_TIMEOUT` | Synthesis exceeded timeout | Retry with shorter text or larger `timeoutMs` |
+| `ALL_FALLBACKS_FAILED` | All engines in `fallbackOrder` failed | Surface to user; do not retry without environment change |
+
+Do not treat all errors as equivalent. A caller that retries `SPAWN_EPERM` will
+loop forever; a caller that does not retry `TTS_BUSY` will drop work unnecessarily.
+```
+
+### 6.3 硬约束
+
+- 示例代码中出现的字段名（`filePath`、`format`、`browserUrl`、`engine`、`fallback`）
+  必须与 `tts_generate` 的实际返回 schema 一致。
+- 错误码表中出现的每一个错误码必须在 `src/errors.ts` 中真实存在。
+  如果代码中某个错误码不存在（例如 `ALL_FALLBACKS_FAILED`），删除该行，
+  不要编造。
+- 不在这节里重复配置表或安装说明，只给集成代码和错误处理契约。
+- 不加“Contact me”或“Open an issue if you want to integrate”之类的邀请语。
+
+### 6.4 验证
+
+```bash
+grep -n "For plugin authors" README.md
+grep -n "TTS_BUSY\|SPAWN_EPERM\|EDGE_TTS_FAILED" README.md
+grep -n "dsh-tts/provider" README.md
+```
+
+期望：`For plugin authors` 出现在 “Usage” 之后；错误码表包含至少四个
+代码中真实存在的错误码；`dsh-tts/provider` 在示例中出现。
+
+## 7. 阶段 F：发布动作
+
+### 7.1 npm 发布前确认
+
+```bash
+npm view dsh-tts version
+npm pack --dry-run
+npm test
+npm run build
+```
+
+要求：
+- `npm view` 返回 404（包名可用）。如果返回了版本号，**停止**，报告“包名已被占用”，
+  不要自行改 scope 后发布。
+- `npm pack --dry-run` 输出中同时可见 `dist/` 和 `cordis.patch.yml`。
+- `npm test` 全绿。
+- `npm run build` 无类型错误。
+
+### 7.2 发布
+
+```bash
+npm publish --access public
+```
+
+### 7.3 GitHub topic
+
+在仓库 About 区域设置 topics：
+
+```
+dsh-plugin  dsh-tts-backend  tts  edge-tts  plugin-infrastructure
+```
+
+`dsh-plugin` 必须存在。`dsh-tts-backend`、`plugin-infrastructure` 是
+定位关键词，允许 GitHub 将它们视为自定义 topic。
+
+如果 `gh` CLI 可用：
+
+```bash
+gh api -X PUT repos/leiboss/dsh-tts/topics --input topics.json
+```
+
+`topics.json`：
+
+```json
+{"names":["dsh-plugin","dsh-tts-backend","tts","edge-tts","plugin-infrastructure"]}
+```
+
+### 7.4 awesome-dsh-plugin YAML（准备好但不在本阶段提交）
+
+在仓库根目录或本地笔记中准备好以下内容，供后续 PR 使用：
+
+```yaml
+url: https://github.com/leiboss/dsh-tts
+name: leiboss/dsh-tts
+category: voice
+description:
+  en: 'Reliable TTS backend for DSH plugin authors: concurrency-safe synthesis, layered error semantics, chunked long-text, and provider fallback. Returns playable audio with browser-accessible URLs.'
+  zh: '面向 DSH 插件作者的可靠 TTS 后端：并发安全合成、分层错误语义、长文本分块与引擎降级，返回可直接播放的音频 URL。'
+```
+
+要求：
+- 不在本阶段直接提交 PR。仓库需满 1 天后才能被索引接受。
+- `description.en` 以 `Reliable TTS backend for DSH plugin authors` 开头，
+  以句号结尾。
+- `category` 为 `voice`。
+
+### 7.5 硬约束
+
+- 不修改 `version` 后再发布多个版本。本阶段只发布一次。
+- 如果 `npm view` 显示包名被占用，停止并报告，不要改 scope 自行发布。
+- 不提交 awesome-dsh-plugin PR，只准备 YAML 内容。
+- 不推送任何 force push。
+
+## 8. 验收清单
+
+- [ ] `package.json` 的 `description` 以 `Reliable TTS infrastructure` 开头，
+      `keywords` 包含 `tts-backend`、`tts-provider`、`plugin-infrastructure`。
+- [ ] README 顶部视觉区有两段引用块，`For plugin authors` 在前、`For end users` 在后。
+- [ ] README 有 `## Reliability semantics` 小节，位于 “How it works” 与 “Tools” 之间，
+      表格中每个错误码在代码中真实存在。
+- [ ] `src/provider.ts` 存在，只含类型定义；`src/index.ts` re-export 了这三个类型。
+- [ ] `package.json` 的 `exports` 包含 `"./provider": "./dist/provider.js"`。
+- [ ] README 有 `## For plugin authors` 小节，包含 Option A / Option B 代码示例
+      和错误处理契约表。
+- [ ] `npm run build` 无类型错误，`npm test` 全绿，测试数量与改动前一致。
+- [ ] `npm view dsh-tts version` 返回 404，`npm publish` 成功。
+- [ ] GitHub 仓库 topics 包含 `dsh-plugin`。
+- [ ] awesome-dsh-plugin 的 YAML 内容已准备好，但未提交。
+
+## 9. 输出要求
+
+按阶段 A → B → C → D → E → F 顺序执行。
+每个阶段结束后：
+1. 列出新增/修改的文件；
+2. 给出该阶段的验证命令和实际输出；
+3. 用一句话说明该阶段是否通过。
+
+如果某个阶段无法执行（例如 `npm view` 显示包名被占用、`gh` CLI 不可用），
+**停止在该阶段**，报告具体原因和已完成的阶段，不要跳过继续执行后续阶段。
+如果阶段 C 或 E 中某个错误码在代码中不存在，删除对应行并说明删除了哪一行，
+不要编造。
