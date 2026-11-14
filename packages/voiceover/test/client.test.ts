@@ -274,3 +274,24 @@ test('registers both locales under its namespace and follows changes', async () 
   assert.ok(subscribed, 'the panel follows live locale switches')
   assert.deepEqual(slotKeys, ['voiceover_create', 'voiceover_status'])
 })
+test('parses SRT into cues and finds the line at a clock position', async () => {
+  const client = await loadClient()
+  const parseSrt = client.parseSrt as (text: string) => { startMs: number; endMs: number; text: string }[]
+  const cueAt = client.cueAt as (cues: unknown, ms: number) => string
+
+  const cues = parseSrt(
+    '1\r\n00:00:00,050 --> 00:00:01,737\r\n第一屏\r\n\r\n2\r\n00:00:02,000 --> 00:00:05,975\r\n第二屏\r\n第二行\r\n',
+  )
+  assert.equal(cues.length, 2)
+  assert.deepEqual(cues[0], { startMs: 50, endMs: 1737, text: '第一屏' })
+  assert.equal(cues[1]?.text, '第二屏\n第二行')
+
+  assert.equal(cueAt(cues, 1000), '第一屏')
+  assert.equal(cueAt(cues, 1800), '', 'between cues nothing is shown')
+  assert.equal(cueAt(cues, 3000), '第二屏\n第二行')
+
+  // Malformed input must not throw or invent cues.
+  assert.deepEqual(parseSrt('not a subtitle'), [])
+  assert.deepEqual(parseSrt(''), [])
+  assert.equal(cueAt(undefined, 0), '')
+})

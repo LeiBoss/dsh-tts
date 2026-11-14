@@ -17,6 +17,13 @@ export interface PanelRouteOptions {
     onRerun?: (projectId: string, chapter?: string) => void | Promise<void>;
     debug?: (message: string) => void;
 }
+/**
+ * Convert SRT to WebVTT.
+ *
+ * Browsers only accept WebVTT in a `<track>`, and several players prefer it;
+ * the only structural differences are the header and the millisecond separator.
+ */
+export declare function srtToVtt(srt: string): string;
 /** Serve one project's persisted progress as JSON. */
 export declare class PanelRoute {
     private readonly options;
@@ -27,6 +34,8 @@ export declare class PanelRoute {
     register(server: HttpRouteRegistrar): () => void;
     /** Handle one request. Never throws: every path answers or closes. */
     private handle;
+    /** Write one text response (subtitles) with no caching. */
+    private answerText;
     /** Write one JSON response with no caching. */
     private answer;
 }

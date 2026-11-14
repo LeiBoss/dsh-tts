@@ -11,6 +11,8 @@
  * first, the path is strictly `<prefix>/<projectId>.json`, and nothing outside
  * the project state file is readable.
  */
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ConnectionFence, RegisterableRoute, HttpRouteRegistrar } from './http-types.ts'
 import { projectSnapshot, type ProjectSnapshot } from './snapshot.ts'
@@ -55,6 +57,16 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   } catch {
     return undefined
   }
+}
+/**
+ * Convert SRT to WebVTT.
+ *
+ * Browsers only accept WebVTT in a `<track>`, and several players prefer it;
+ * the only structural differences are the header and the millisecond separator.
+ */
+export function srtToVtt(srt: string): string {
+  const body = srt.replace(/\r\n/g, '\n').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+  return `WEBVTT\n\n${body}`
 }
 /** Serve one project's persisted progress as JSON. */
 export class PanelRoute {
@@ -153,7 +165,60 @@ export class PanelRoute {
       return
     }
 
-    this.answer(res, 400, { error: 'expected /<projectId>.json or /<projectId>/rerun' })
+    // Subtitles, so the panel can show the current line while playing and a
+    // caller can pull a WebVTT track for a browser player.
+    const subtitleMatch = /^([0-9a-f]{8,24})\/subtitles\/(ch-[0-9]{2,3})(\.vtt)?$/.exec(name)
+    if (subtitleMatch !== null) {
+      if (req.method !== 'GET') {
+        this.answer(res, 405, { error: 'method not allowed' })
+        return
+      }
+      const projectId = subtitleMatch[1] ?? ''
+      const chapterId = subtitleMatch[2] ?? ''
+      const asVtt = subtitleMatch[3] !== undefined
+      const snapshot = await this.snapshot(projectId)
+      if (snapshot === undefined) {
+        this.answer(res, 404, { error: 'unknown project' })
+        return
+      }
+      const chapter = snapshot.chapters.find((entry) => entry.id === chapterId)
+      if (chapter?.subtitles === undefined) {
+        this.answer(res, 404, { error: 'this chapter has no subtitles' })
+        return
+      }
+      const projectDir = join(this.options.outputDir, projectId)
+      const filePath = join(projectDir, chapter.subtitles)
+      if (!filePath.startsWith(projectDir)) {
+        this.answer(res, 400, { error: 'bad subtitle path' })
+        return
+      }
+      let text: string
+      try {
+        text = await readFile(filePath, 'utf8')
+      } catch {
+        this.answer(res, 404, { error: 'subtitle file missing' })
+        return
+      }
+      this.answerText(res, asVtt ? 'text/vtt; charset=utf-8' : 'text/plain; charset=utf-8', asVtt ? srtToVtt(text) : text)
+      return
+    }
+
+    this.answer(res, 400, { error: 'expected /<projectId>.json, /<projectId>/rerun or /<projectId>/subtitles/<chapter>' })
+  }
+
+  /** Write one text response (subtitles) with no caching. */
+  private answerText(res: ServerResponse, contentType: string, body: string): void {
+    if (res.headersSent) {
+      res.end()
+      return
+    }
+    const payload = Buffer.from(body, 'utf8')
+    res.writeHead(200, {
+      'content-type': contentType,
+      'cache-control': 'no-store',
+      'content-length': String(payload.length),
+    })
+    res.end(payload)
   }
 
   /** Write one JSON response with no caching. */

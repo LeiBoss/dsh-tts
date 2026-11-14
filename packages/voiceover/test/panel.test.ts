@@ -8,6 +8,11 @@ import { PANEL_ROUTE_PREFIX, PanelRoute, type RegisterableRoute } from '../src/p
 
 const PROJECT_ID = 'abcdef123456'
 
+/** Windows keeps a directory busy for a moment after a write. */
+async function removeWithRetry(path: string): Promise<void> {
+  await rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+}
+
 /** Persist a minimal but schema-shaped project state. */
 async function seedProject(root: string, projectId = PROJECT_ID): Promise<void> {
   const dir = join(root, projectId, 'state')
@@ -70,8 +75,8 @@ function fakeResponse(): { res: ServerResponse; status: () => number; body: () =
       state.status = status
       return res
     },
-    end(payload?: string) {
-      state.body = payload ?? ''
+    end(payload?: string | Buffer) {
+      state.body = payload === undefined ? '' : String(payload)
       return res
     },
   } as unknown as ServerResponse
@@ -331,5 +336,41 @@ test('snapshot reports the timing quality the chapters actually have', async () 
     assert.equal(snapshot?.capability.timingQuality, 'exact')
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+test('serves subtitles as SRT and as WebVTT', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+    await mkdir(join(root, PROJECT_ID, 'audio'), { recursive: true })
+    await writeFile(
+      join(root, PROJECT_ID, 'audio', 'ch-01.srt'),
+      '1\n00:00:00,000 --> 00:00:02,500\n第一屏\n\n2\n00:00:03,000 --> 00:00:05,000\n第二屏\n',
+    )
+    const route = new PanelRoute({ outputDir: root })
+    const server = fakeServer()
+    route.register(server.server)
+
+    const srt = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/subtitles/ch-01`), srt.res)
+    assert.equal(srt.status(), 200)
+    assert.match(srt.body(), /00:00:00,000 --> 00:00:02,500/)
+
+    const vtt = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/subtitles/ch-01.vtt`), vtt.res)
+    assert.equal(vtt.status(), 200)
+    assert.match(vtt.body(), /^WEBVTT\n\n/)
+    assert.match(vtt.body(), /00:00:00\.000 --> 00:00:02\.500/)
+
+    // The second chapter in the fixture has no subtitle record yet.
+    const missing = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/subtitles/ch-02`), missing.res)
+    assert.equal(missing.status(), 404)
+
+    const post = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/subtitles/ch-01`, 'POST'), post.res)
+    assert.equal(post.status(), 405)
+  } finally {
+    await removeWithRetry(root)
   }
 })

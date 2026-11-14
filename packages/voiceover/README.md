@@ -138,3 +138,51 @@ curl -H "Authorization: Bearer $env:DSH_VOICEOVER_TOKEN" `
 建项目和续跑都是异步的：立即返回 202，进度靠 `/v1/projects/:id` 轮询。
 上游限流时 `/v1/tts` 返回 `429` + `Retry-After: 30`（引擎自身会先按 2s/6s/18s
 退避重试同一引擎，预算耗尽才降级），调用方照 `Retry-After` 重试即可。
+## 字幕怎么看（重要）
+
+`.srt` 是旁挂文件，**Windows 自带播放器和浏览器都不会自动加载它**。三种能真正看到字幕的方式：
+
+| 方式 | 需要什么 | 适用 |
+|---|---|---|
+| 面板内播放 | 无 | 在 DSH 里试听：播放器下方按时间轴显示当前这一句 |
+| VLC 等支持旁挂字幕的播放器 | 把 `ch-01.srt` 与 `ch-01.mp3` 放同目录同名 | 本机任意系统 |
+| 浏览器 `<track>` | 用 `.vtt`（面板路由已提供转换） | 自建网页播放器 |
+| 封装成 MP4 / 烧录进画面 | ffmpeg | Windows 自带播放器、发给别人 |
+
+### 面板内
+
+播放某章时，进度条下方的文本会跟着朗读实时切换——字幕面板只从
+`GET /voiceover/panel/<id>/subtitles/<chapter>` 取，不额外落盘。
+
+### VLC
+
+```
+ch-01.mp3
+ch-01.srt     ← 同名同目录
+```
+
+VLC 打开 mp3 会自动加载同名字幕；Windows 的「电影和电视」「Media Player」不会。
+
+### 浏览器
+
+`<audio>` 元素不渲染字幕，必须用 `<video>` 承载（音频轨也能放在 video 里）：
+
+```html
+<video controls src="/voiceover/audio/...">
+  <track kind="subtitles" srclang="zh" label="中文" default
+         src="/voiceover/panel/<id>/subtitles/ch-01.vtt">
+</video>
+```
+
+### 封装或烧录（让 Windows 自带播放器也能看）
+
+```bash
+# 封装：MP4 + mov_text 字幕轨（VLC / 部分播放器可切换）
+ffmpeg -i ch-01.mp3 -i ch-01.srt -map 0:a -map 1:0 -c:a copy -c:s mov_text ch-01.mp4
+
+# 烧录：字幕画在画面里，任何播放器都能看（需要先造一路视频画面）
+ffmpeg -f lavfi -i color=c=black:s=1280x720:r=1 -i ch-01.mp3 -vf "subtitles=ch-01.srt" \
+       -shortest -c:a aac -c:v libx264 ch-01-burned.mp4
+```
+
+这两条命令需要 ffmpeg；插件不内置它，也不会因为缺它而失败。

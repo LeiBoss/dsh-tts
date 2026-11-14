@@ -2,6 +2,12 @@
 
 ## 0.3.0
 
+- Subtitles are now visible where they are actually used: the panel shows the
+  current line under the player, synced to playback, and the host serves
+  `/voiceover/panel/<id>/subtitles/<chapter>` (plus `.vtt` conversion for browser
+  `<track>`). A sidecar SRT alone is invisible in Windows players and in an
+  `<audio>` element, which made the earlier deliverable look subtitle-free.
+
 - Localisation: every panel string lives in the client locale namespace `voiceover`
   with `zh` and `en` dictionaries registered on mount. Lookups read the active
   language at call time and a locale subscription re-renders mounted panels, so

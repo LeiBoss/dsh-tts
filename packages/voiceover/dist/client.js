@@ -319,7 +319,9 @@ window.__ModuleLoader__.load({
         fontSize: FONT_META,
         lineHeight: '18px',
       },
+      playerWrap: { display: 'grid', gap: 4 },
       player: { width: '100%', height: 32 },
+      cue: { fontSize: FONT, lineHeight: 1.5, color: 'var(--dsw-alias-label-primary)', overflowWrap: 'anywhere' },
       retryBtn: {
         fontSize: FONT_META,
         padding: '0 6px',
@@ -400,6 +402,44 @@ window.__ModuleLoader__.load({
         .join(':')
     }
 
+    /** Parse one SRT timestamp (`HH:MM:SS,mmm`) into milliseconds. */
+    function parseTime(value) {
+      const match = /^(\d{2}):(\d{2}):(\d{2})[.,](\d{3})$/.exec(String(value ?? '').trim())
+      if (match === null) return NaN
+      return Number(match[1]) * 3600000 + Number(match[2]) * 60000 + Number(match[3]) * 1000 + Number(match[4])
+    }
+
+    /**
+     * Parse an SRT document into cues.
+     * @param {string} text
+     * @returns {{ startMs: number, endMs: number, text: string }[]}
+     */
+    function parseSrt(text) {
+      const normalized = String(text ?? '').replace(/\r\n/g, '\n').trim()
+      if (normalized.length === 0) return []
+      const cues = []
+      for (const block of normalized.split('\n\n')) {
+        const lines = block.split('\n')
+        const timeIndex = lines.findIndex((line) => line.includes('-->'))
+        if (timeIndex < 0) continue
+        const [startRaw, endRaw] = (lines[timeIndex] ?? '').split('-->').map((part) => part.trim())
+        const startMs = parseTime(startRaw)
+        const endMs = parseTime(endRaw)
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue
+        const text2 = lines.slice(timeIndex + 1).join('\n').trim()
+        if (text2.length > 0) cues.push({ startMs, endMs, text: text2 })
+      }
+      return cues
+    }
+
+    /** The cue visible at `ms`, or an empty string between cues. */
+    function cueAt(cues, ms) {
+      if (!Array.isArray(cues)) return ''
+      for (const cue of cues) {
+        if (ms >= cue.startMs && ms < cue.endMs) return cue.text
+      }
+      return ''
+    }
     /** Translate the pipeline's warning strings into one user sentence. */
     function warningText(warning) {
       const text = typeof warning === 'string' ? warning : String(warning)
@@ -552,6 +592,9 @@ window.__ModuleLoader__.load({
       // audio elements, and the URL is stored at click time so a snapshot
       // refresh cannot restart playback.
       const [playing, setPlaying] = react.useState(null)
+      // Subtitles for the chapter currently playing, and the line at its clock.
+      const [cues, setCues] = react.useState([])
+      const [cue, setCue] = react.useState('')
       // Bumping this restarts the polling effect, which is how the rerun button
       // gets fresh progress without a second fetch path.
       const [nonce, setNonce] = react.useState(0)
@@ -702,6 +745,33 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /**
+       * Play or stop one chapter, and load its subtitles.
+       *
+       * The panel is the only place these subtitles are visible: a sidecar
+       * `.srt` is invisible in Windows' built-in player and in an <audio>
+       * element, so the current line is rendered here instead.
+       */
+      const playChapter = async (chapter) => {
+        if (playing !== null && playing.id === chapter.id) {
+          setPlaying(null)
+          setCue('')
+          return
+        }
+        setPlaying({ id: chapter.id, url: chapter.audioUrl })
+        setCue('')
+        setCues([])
+        if (chapter.subtitles === undefined) return
+        try {
+          const res = await fetch(`/voiceover/panel/${id}/subtitles/${chapter.id}`, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          })
+          if (res.ok) setCues(parseSrt(await res.text()))
+        } catch {
+          // Without subtitles the player still works; the line simply stays empty.
+        }
+      }
       // Per-chapter retry: the same route, narrowed to one chapter. The Tool
       // reaches the same operation through `voiceover_rerun({ chapter })`.
       const retryChapter = async (chapter) => {
@@ -778,28 +848,32 @@ window.__ModuleLoader__.load({
                   chapter,
                   playing: playing !== null && playing.id === chapter.id,
                   retrying: retrying === chapter.id,
-                  onPlay: (target) =>
-                    setPlaying((current) =>
-                      current !== null && current.id === target.id
-                        ? null
-                        : { id: target.id, url: target.audioUrl },
-                    ),
+                  onPlay: (target) => void playChapter(target),
                   onRetry: (target) => void retryChapter(target),
                 }),
               ),
             ),
         playing === null
           ? null
-          : h('audio', {
-              key: playing.url,
-              src: playing.url,
-              controls: true,
-              autoPlay: true,
-              preload: 'none',
-              style: S.player,
-              'aria-label': tr('audio.label', { id: playing.id }),
-              onEnded: () => setPlaying(null),
-            }),
+          : h(
+              'div',
+              { style: S.playerWrap },
+              h('audio', {
+                key: playing.url,
+                src: playing.url,
+                controls: true,
+                autoPlay: true,
+                preload: 'none',
+                style: S.player,
+                'aria-label': tr('audio.label', { id: playing.id }),
+                onTimeUpdate: (event) => setCue(cueAt(cues, event.currentTarget.currentTime * 1000)),
+                onEnded: () => {
+                  setPlaying(null)
+                  setCue('')
+                },
+              }),
+              cue.length === 0 ? null : h('div', { style: S.cue }, cue),
+            ),
         failedCount > 0
           ? h(
               'div',
@@ -903,6 +977,8 @@ window.__ModuleLoader__.load({
     exports.warningText = warningText
     exports.stateWord = stateWord
     exports.formatClock = formatClock
+    exports.parseSrt = parseSrt
+    exports.cueAt = cueAt
     exports.VoiceoverPanel = VoiceoverPanel
     return module.exports
   },
