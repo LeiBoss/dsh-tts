@@ -2,6 +2,12 @@
 
 ## 0.3.0
 
+- Localisation: every panel string lives in the client locale namespace `voiceover`
+  with `zh` and `en` dictionaries registered on mount. Lookups read the active
+  language at call time and a locale subscription re-renders mounted panels, so
+  switching language applies without a reload. A client without the locale
+  service falls back to Chinese.
+
 - Accessibility: the progress bar exposes `role="progressbar"` with value text, the
   state line is a polite live region, the panel's buttons are native with a visible
   `:focus-visible` ring, and decorative counts are hidden from screen readers.

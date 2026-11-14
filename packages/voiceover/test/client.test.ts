@@ -215,3 +215,62 @@ test('renders progress semantics, a live region and a keyboard focus style', asy
   assert.ok(bulk, 'the retry button is a native, focusable button')
   assert.equal(bulk.props.disabled, false)
 })
+test('both dictionaries cover exactly the same keys', async () => {
+  const client = await loadClient()
+  const messages = client.__messages as Record<string, Record<string, string>>
+  const zh = Object.keys(messages.zh).sort()
+  const en = Object.keys(messages.en).sort()
+  assert.deepEqual(en, zh, 'a translation must not drift from the source language')
+  for (const key of zh) {
+    assert.ok((messages.zh[key] ?? '').length > 0, `zh.${key} is empty`)
+    assert.ok((messages.en[key] ?? '').length > 0, `en.${key} is empty`)
+  }
+})
+
+test('registers both locales under its namespace and follows changes', async () => {
+  const client = await loadClient()
+  const apply = client.apply as (ctx: unknown) => void
+
+  const registered: string[] = []
+  const boundTo: string[] = []
+  const slotKeys: string[] = []
+  let subscribed = false
+  const catalog: Record<string, string> = { 'group.label': 'Voiceover progress' }
+  const locale = {
+    register(namespace: string, code: string) {
+      registered.push(`${namespace}:${code}`)
+      return () => {}
+    },
+    bind(namespace: string) {
+      boundTo.push(namespace)
+      return (key: string) => catalog[key] ?? key
+    },
+    getSnapshot() {
+      return { active: 'en', locales: [], revision: 1 }
+    },
+    subscribe() {
+      subscribed = true
+      return () => {}
+    },
+  }
+
+  apply({
+    get: (key: string) => (key === 'locale' ? locale : undefined),
+    slots: {
+      inject: (_name: string, generator: () => Generator<unknown>) => {
+        for (const _ of generator()) {
+          // Drain to run the registrations.
+        }
+      },
+      register: (options: { key: string }) => {
+        slotKeys.push(options.key)
+        return () => {}
+      },
+    },
+  })
+
+  assert.deepEqual(registered.sort(), ['voiceover:en', 'voiceover:zh'])
+  assert.deepEqual(boundTo, ['voiceover'])
+  assert.ok(subscribed, 'the panel follows live locale switches')
+  assert.deepEqual(slotKeys, ['voiceover_create', 'voiceover_status'])
+})
