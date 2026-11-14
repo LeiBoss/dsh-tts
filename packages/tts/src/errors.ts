@@ -18,6 +18,7 @@ export const ErrorCode = {
   SpawnEperm: 'SPAWN_EPERM',
   SpawnFailed: 'SPAWN_FAILED',
   EdgeTtsFailed: 'EDGE_TTS_FAILED',
+  UpstreamThrottled: 'UPSTREAM_THROTTLED',
   SynthesisTimeout: 'SYNTHESIS_TIMEOUT',
   EmptyAudio: 'EMPTY_AUDIO',
   Aborted: 'ABORTED',
@@ -45,6 +46,18 @@ const PROTOCOL_DRIFT_PATTERNS: readonly RegExp[] = [
 /** Whether captured subprocess output looks like protocol drift, not jitter. */
 export function looksLikeProtocolDrift(text: string): boolean {
   return PROTOCOL_DRIFT_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+/**
+ * Substrings that mean the endpoint is rate limiting us rather than failing.
+ * Throttling is transient and worth a backoff; falling back to another engine
+ * would only hide the load problem and produce worse audio.
+ */
+const THROTTLE_PATTERNS: readonly RegExp[] = [/\b429\b/, /too many requests/i, /rate limit/i]
+
+/** Whether captured output looks like upstream throttling. */
+export function looksLikeThrottle(text: string): boolean {
+  return THROTTLE_PATTERNS.some((pattern) => pattern.test(text))
 }
 
 /** Options accepted by {@link TtsError}. */

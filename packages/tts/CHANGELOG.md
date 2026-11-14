@@ -2,6 +2,11 @@
 
 ## 0.3.0
 
+- Throttling is retried, not papered over: a 429 is classified as
+  `UPSTREAM_THROTTLED` and the same engine is retried after 2s, 6s and 18s
+  before the fallback chain runs. Backing off keeps the good voice; falling back
+  to SAPI would hide the load problem and produce worse audio.
+
 - `AudioRoute` accepts a `prefix` option (default unchanged). A consumer such as the
   voiceover plugin reuses the route under its own path instead of contending for
   `/dsh-tts/audio`.

@@ -145,3 +145,15 @@ test('chunked synthesis shifts word offsets by the preceding chunk duration', as
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('classifies a throttled response as UPSTREAM_THROTTLED', async () => {
+  setEdgeJsLoader(async () => failingModule('Unexpected server response: 429'))
+  try {
+    await assert.rejects(
+      () => synthesizeWithEdgeJs({ text: 'x', voice: 'zh-CN-XiaoxiaoNeural' }),
+      (error: unknown) => error instanceof TtsError && error.code === ErrorCode.UpstreamThrottled,
+    )
+  } finally {
+    setEdgeJsLoader(undefined)
+  }
+})

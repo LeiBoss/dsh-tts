@@ -17,7 +17,7 @@ import { ConcurrencyLimiter } from './concurrency.ts'
 import type { ResolvedConfig, TtsEngine } from './config.ts'
 import { synthesize, type SpawnFunction, type SynthesizedAudio } from './edge-tts.ts'
 import { isEdgeJsAvailable, synthesizeWithEdgeJs, type EdgeJsWord } from './engines/edge-js.ts'
-import { ErrorCode, TtsError } from './errors.ts'
+import { ErrorCode, looksLikeThrottle, TtsError } from './errors.ts'
 import { isFallbackEligible, runFallback, type FallbackAttempt } from './fallback.ts'
 import { probeEndpoint, type ProbeConnector } from './probe.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
@@ -91,6 +91,8 @@ export interface TtsServiceDeps {
   probeConnect?: ProbeConnector
   now?: () => Date
   limiter?: ConcurrencyLimiter
+  /** Backoff sleep; injected so retry tests never wait. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   log?: (message: string) => void
 }
 
@@ -113,6 +115,15 @@ const VOLUME_PATTERN = /^[+-]\d{1,3}%$/
 
 /** Average spoken characters per second for Chinese at `+0%`. */
 const CHARS_PER_SECOND = 4.6
+
+/** Backoff schedule for upstream throttling, tried before any fallback. */
+const THROTTLE_BACKOFF_MS: readonly number[] = [2000, 6000, 18000]
+
+/** Whether a failure is transient throttling worth backing off on. */
+function isThrottleError(error: unknown): boolean {
+  if (!(error instanceof TtsError)) return false
+  return error.code === ErrorCode.UpstreamThrottled || looksLikeThrottle(error.detail)
+}
 
 /** Parse a signed percentage such as `+10%` into a speed factor. */
 function rateFactor(rate: string): number {
@@ -272,8 +283,44 @@ export class TtsService {
   /** Produce audio without consulting the cache. */
   private async produce(input: SynthesisInput): Promise<TtsResult> {
     const engine = await this.resolveEngine()
-    if (engine === 'edge-js') return this.produceWithEdgeJs(input)
-    return this.produceWithCli(input)
+    const attempt = (): Promise<TtsResult> =>
+      engine === 'edge-js' ? this.produceWithEdgeJs(input) : this.produceWithCli(input)
+
+    // Throttling is transient: back off and retry the good engine before
+    // falling back. A fallback would hide the load problem and produce worse
+    // audio, and a 429 from Edge usually clears within seconds.
+    let lastError: unknown
+    for (let index = 0; index <= THROTTLE_BACKOFF_MS.length; index += 1) {
+      try {
+        return await attempt()
+      } catch (error) {
+        lastError = error
+        const delay = THROTTLE_BACKOFF_MS[index]
+        if (delay === undefined || !isThrottleError(error)) break
+        this.log(`upstream throttled; retrying in ${delay}ms`)
+        await this.sleep(delay, input.signal)
+      }
+    }
+    return this.fallbackChain(input, lastError)
+  }
+
+  /** Wait between throttle retries; injected in tests so they never sleep. */
+  private async sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (this.deps.sleep !== undefined) {
+      await this.deps.sleep(ms, signal)
+      return
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, ms)
+      signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer)
+          reject(new TtsError(ErrorCode.Aborted, 'Synthesis was aborted during a throttle backoff.'))
+        },
+        { once: true },
+      )
+    })
   }
 
   /** CLI backend: one process per chunk, no word boundaries. */
@@ -281,42 +328,38 @@ export class TtsService {
     const { text, voice, rate, pitch, volume, hash, signal } = input
     const chunked = this.config.chunkingEnabled && text.length > this.config.chunkSize
 
-    try {
-      const audio = chunked
-        ? await synthesizeChunked(text, {
-            voice,
-            rate,
-            pitch,
-            volume,
-            proxy: this.config.proxy,
-            binary: this.config.edgeTtsBinary,
-            outputDir: this.config.outputDir,
-            hash,
-            timeoutMs: this.config.timeoutMs,
-            totalTimeoutMs: this.config.totalTimeoutMs,
-            chunkSize: this.config.chunkSize,
-            signal,
-            spawnImpl: this.deps.spawnImpl,
-            now: this.deps.now?.(),
-          })
-        : await synthesize(text, {
-            voice,
-            rate,
-            pitch,
-            volume,
-            proxy: this.config.proxy,
-            binary: this.config.edgeTtsBinary,
-            outputDir: this.config.outputDir,
-            hash,
-            timeoutMs: this.config.timeoutMs,
-            signal,
-            spawnImpl: this.deps.spawnImpl,
-            now: this.deps.now?.(),
-          })
-      return this.finish(audio, { text, voice, rate, pitch, volume, engine: 'edge-py' })
-    } catch (error) {
-      return this.fallbackChain(input, error)
-    }
+    const audio = chunked
+      ? await synthesizeChunked(text, {
+          voice,
+          rate,
+          pitch,
+          volume,
+          proxy: this.config.proxy,
+          binary: this.config.edgeTtsBinary,
+          outputDir: this.config.outputDir,
+          hash,
+          timeoutMs: this.config.timeoutMs,
+          totalTimeoutMs: this.config.totalTimeoutMs,
+          chunkSize: this.config.chunkSize,
+          signal,
+          spawnImpl: this.deps.spawnImpl,
+          now: this.deps.now?.(),
+        })
+      : await synthesize(text, {
+          voice,
+          rate,
+          pitch,
+          volume,
+          proxy: this.config.proxy,
+          binary: this.config.edgeTtsBinary,
+          outputDir: this.config.outputDir,
+          hash,
+          timeoutMs: this.config.timeoutMs,
+          signal,
+          spawnImpl: this.deps.spawnImpl,
+          now: this.deps.now?.(),
+        })
+    return this.finish(audio, { text, voice, rate, pitch, volume, engine: 'edge-py' })
   }
 
   /** Pure-JS backend: one connection per chunk, word boundaries preserved. */
@@ -331,46 +374,41 @@ export class TtsService {
     const words: EdgeJsWord[] = []
     let offsetMs = 0
 
-    try {
-      for (const chunk of chunks) {
-        if (signal?.aborted) {
-          throw new TtsError(ErrorCode.Aborted, 'Synthesis was aborted between chunks.')
-        }
-        const result = await synthesizeWithEdgeJs({
-          text: chunk,
-          voice,
-          rate,
-          pitch,
-          volume,
-          ...(this.config.proxy === undefined ? {} : { proxy: this.config.proxy }),
-          timeoutMs: this.config.timeoutMs,
-        })
-        buffers.push(result.audio)
-        for (const word of result.words) {
-          words.push({ ...word, offsetMs: word.offsetMs + offsetMs })
-        }
-        const measured = measureMp3(result.audio)
-        offsetMs += measured?.durationMs ?? wordsEndMs(result.words)
+    for (const chunk of chunks) {
+      if (signal?.aborted) {
+        throw new TtsError(ErrorCode.Aborted, 'Synthesis was aborted between chunks.')
       }
-
-      const audio = Buffer.concat(buffers)
-      const filePath = outputFilePath(this.config.outputDir, hash, this.deps.now?.())
-      await mkdir(dirname(filePath), { recursive: true })
-      await writeFile(filePath, audio)
-
-      return this.finish(
-        { filePath, format: AUDIO_FORMAT },
-        { text, voice, rate, pitch, volume, engine: 'edge-js' },
-        {
-          ...(words.length === 0 ? {} : { words }),
-          ...(offsetMs > 0 ? { durationMs: offsetMs, timingQuality: 'exact' as const } : {}),
-        },
-      )
-    } catch (error) {
-      return this.fallbackChain(input, error)
+      const result = await synthesizeWithEdgeJs({
+        text: chunk,
+        voice,
+        rate,
+        pitch,
+        volume,
+        ...(this.config.proxy === undefined ? {} : { proxy: this.config.proxy }),
+        timeoutMs: this.config.timeoutMs,
+      })
+      buffers.push(result.audio)
+      for (const word of result.words) {
+        words.push({ ...word, offsetMs: word.offsetMs + offsetMs })
+      }
+      const measured = measureMp3(result.audio)
+      offsetMs += measured?.durationMs ?? wordsEndMs(result.words)
     }
-  }
 
+    const audio = Buffer.concat(buffers)
+    const filePath = outputFilePath(this.config.outputDir, hash, this.deps.now?.())
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, audio)
+
+    return this.finish(
+      { filePath, format: AUDIO_FORMAT },
+      { text, voice, rate, pitch, volume, engine: 'edge-js' },
+      {
+        ...(words.length === 0 ? {} : { words }),
+        ...(offsetMs > 0 ? { durationMs: offsetMs, timingQuality: 'exact' as const } : {}),
+      },
+    )
+  }
   /** Try the configured chain after the primary backend failed. */
   private async fallbackChain(input: SynthesisInput, error: unknown): Promise<TtsResult> {
     if (!this.config.fallbackEnabled || !isFallbackEligible(error)) throw error

@@ -17,6 +17,7 @@ export const ErrorCode = {
     SpawnEperm: 'SPAWN_EPERM',
     SpawnFailed: 'SPAWN_FAILED',
     EdgeTtsFailed: 'EDGE_TTS_FAILED',
+    UpstreamThrottled: 'UPSTREAM_THROTTLED',
     SynthesisTimeout: 'SYNTHESIS_TIMEOUT',
     EmptyAudio: 'EMPTY_AUDIO',
     Aborted: 'ABORTED',
@@ -40,6 +41,16 @@ const PROTOCOL_DRIFT_PATTERNS = [
 /** Whether captured subprocess output looks like protocol drift, not jitter. */
 export function looksLikeProtocolDrift(text) {
     return PROTOCOL_DRIFT_PATTERNS.some((pattern) => pattern.test(text));
+}
+/**
+ * Substrings that mean the endpoint is rate limiting us rather than failing.
+ * Throttling is transient and worth a backoff; falling back to another engine
+ * would only hide the load problem and produce worse audio.
+ */
+const THROTTLE_PATTERNS = [/\b429\b/, /too many requests/i, /rate limit/i];
+/** Whether captured output looks like upstream throttling. */
+export function looksLikeThrottle(text) {
+    return THROTTLE_PATTERNS.some((pattern) => pattern.test(text));
 }
 /**
  * Structured plugin error: a routable `code`, a human-readable message, and an

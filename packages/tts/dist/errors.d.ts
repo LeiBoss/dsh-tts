@@ -17,6 +17,7 @@ export declare const ErrorCode: {
     readonly SpawnEperm: "SPAWN_EPERM";
     readonly SpawnFailed: "SPAWN_FAILED";
     readonly EdgeTtsFailed: "EDGE_TTS_FAILED";
+    readonly UpstreamThrottled: "UPSTREAM_THROTTLED";
     readonly SynthesisTimeout: "SYNTHESIS_TIMEOUT";
     readonly EmptyAudio: "EMPTY_AUDIO";
     readonly Aborted: "ABORTED";
@@ -27,6 +28,8 @@ export declare const ErrorCode: {
 export type TtsErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 /** Whether captured subprocess output looks like protocol drift, not jitter. */
 export declare function looksLikeProtocolDrift(text: string): boolean;
+/** Whether captured output looks like upstream throttling. */
+export declare function looksLikeThrottle(text: string): boolean;
 /** Options accepted by {@link TtsError}. */
 export interface TtsErrorOptions extends ErrorOptions {
     /** Marks a failure caused by upstream protocol drift rather than jitter. */

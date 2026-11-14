@@ -9,7 +9,7 @@
  * The module is an optional dependency: a host without it still gets the CLI
  * path, so the import is dynamic and the loader is injectable for tests.
  */
-import { ErrorCode, TtsError } from '../errors.ts'
+import { ErrorCode, looksLikeThrottle, TtsError } from '../errors.ts'
 
 /** One word boundary as Edge reports it. */
 export interface EdgeJsWord {
@@ -81,6 +81,14 @@ function languageOf(voice: string): string {
 /** Classify a backend failure as protocol drift when the handshake is rejected. */
 function asTtsError(error: unknown): TtsError {
   const detail = error instanceof Error ? error.message : String(error)
+  if (looksLikeThrottle(detail)) {
+    return new TtsError(
+      ErrorCode.UpstreamThrottled,
+      `The Edge endpoint is throttling requests: ${detail}`,
+      'Retry shortly. The engine backs off automatically before falling back to another voice engine.',
+      { cause: error },
+    )
+  }
   const drift = /403|handshake|sec-ms-gec|invalid response status/i.test(detail)
   return new TtsError(
     ErrorCode.EdgeTtsFailed,

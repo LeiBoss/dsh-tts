@@ -69,6 +69,8 @@ export interface TtsServiceDeps {
     probeConnect?: ProbeConnector;
     now?: () => Date;
     limiter?: ConcurrencyLimiter;
+    /** Backoff sleep; injected so retry tests never wait. */
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
     log?: (message: string) => void;
 }
 /** One service instance owns one capacity pool and one cache namespace. */
@@ -87,6 +89,8 @@ export declare class TtsService {
     private resolveEngine;
     /** Produce audio without consulting the cache. */
     private produce;
+    /** Wait between throttle retries; injected in tests so they never sleep. */
+    private sleep;
     /** CLI backend: one process per chunk, no word boundaries. */
     private produceWithCli;
     /** Pure-JS backend: one connection per chunk, word boundaries preserved. */
