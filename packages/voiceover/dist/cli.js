@@ -131,6 +131,9 @@ function engineSynthesizer(engine) {
                 durationMs: result.durationMs,
                 timingQuality: result.timingQuality,
                 format: result.format === 'wav' ? 'wav' : 'mp3',
+                // Report the engine that actually ran; without it the manifest falls
+                // back to the planning-time guess and claims edge-py while edge-js ran.
+                engine: result.engine,
                 ...(result.words === undefined ? {} : { words: result.words }),
             };
         },
