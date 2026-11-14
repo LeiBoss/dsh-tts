@@ -11,3 +11,5 @@ node_modules/
 # Host-probe build output (.pack holds npm pack tarballs and probe results).
 .pack/
 .probe-result.json
+# Never commit a registry token; the user-level ~/.npmrc is the place for it.
+.npmrc
