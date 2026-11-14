@@ -12,6 +12,7 @@ DSH 音频能力，两个包：
 - [`docs/DESIGN.md`](docs/DESIGN.md) — 定位、产物契约、架构、降级矩阵、D 线 daemon/MCP、里程碑
 - [`docs/PROMPTS.md`](docs/PROMPTS.md) — 生产链路提示词 P0a–P7、评测集、反模式
 - [`docs/BUILD-PROMPTS.md`](docs/BUILD-PROMPTS.md) — 给 AI 编程代理的 M0–M6 实现提示词
+- [`docs/INSTALL.md`](docs/INSTALL.md) — **给别人用**：安装、首次上手、配置、常见问题、发布清单
 
 ## 开发
 

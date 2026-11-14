@@ -63,8 +63,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "pretest": "node ../../scripts/check-node.mjs",
     "test": "node --test \"test/**/*.test.ts\"",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "node ../../scripts/check-node.mjs && npm run build && npm test"
   },
   "publishConfig": {
     "access": "public"

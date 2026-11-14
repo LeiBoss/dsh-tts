@@ -65,10 +65,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "pretest": "node ../../scripts/check-node.mjs",
     "test": "node --test \"test/**/*.test.ts\"",
     "test:integration": "node test/integration.ts",
     "check:engines": "node scripts/check-engines.mjs",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "node ../../scripts/check-node.mjs && npm run build && npm test"
   },
   "publishConfig": {
     "access": "public"
