@@ -127,6 +127,17 @@ dsh plugin --profile vo-demo remove @leiboss/dsh-tts
 
 ## 附：发布清单（只有仓库维护者能做）
 
+**用脚本发布**（它自己找 Node ≥22.18 并注入 PATH——直接 `npm publish` 在 Node 20 的 shell 里会失败，
+因为 npm 用 `cmd /c node ...` 跑生命周期脚本，只看 PATH）：
+
+```powershell
+npm login                                    # 只需一次
+powershell -File scripts\publish.ps1 -DryRun # 先演练：构建 + 测试 + 打包，不上传
+powershell -File scripts\publish.ps1 -Otp 123456
+```
+
+脚本会校验 `voiceover` 的 `@leiboss/dsh-tts` 依赖范围与实际引擎版本一致，再按顺序发布。
+
 发布前必须按顺序完成，否则别人装不上：
 
 1. `npm run build` + 两个包 `npm test` 全绿（Node ≥ 22.18）
