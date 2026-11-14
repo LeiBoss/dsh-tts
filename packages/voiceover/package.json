@@ -29,16 +29,27 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./client": "./dist/client.js",
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "immediately": true
     }
   },
   "files": [
     "dist",
+    "client",
     "cordis.patch.yml",
     "schemas",
     "README.md"
@@ -48,7 +59,7 @@
     "dsh": ">=0.2.2-rc.1"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "test": "node --test \"test/**/*.test.ts\"",
     "prepublishOnly": "npm run build && npm test"
   },

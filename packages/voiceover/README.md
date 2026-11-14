@@ -64,3 +64,18 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 - 运行跟随宿主进程；宿主要求「创建即返回」，所以长任务在后台，进程退出即中断（可用 `voiceover_status` 续跑）
 - 字幕质量为 `estimated` 时文件名带 `.est`，不要当帧级精确使用
 - 暂无 UI 面板 / daemon / zip 导出
+## 对话内进度面板
+
+`voiceover_create` / `voiceover_status` 的结果下方会渲染一个进度面板（仅 DSH Web 宿主）：
+
+- 标题 + `完成/总章数` + 进度条
+- 能力条：`模型 改写`／`按原文朗读`、`Edge 可达`／`本地引擎`、`字幕 精确`／`估算`
+- 逐章状态（排队/改写/合成/完成/失败）、时长、是否带字幕
+- 降级与失败原因（warnings）
+
+面板从工具结果里取 `projectId`，随后轮询宿主只读路由 `GET /voiceover/panel/<projectId>.json`
+（同一会话围栏，只返回进度，不返回稿件正文与文件路径）。首章规划期间显示「准备中」，
+不再误报接口不可用。
+
+**没有播放按钮**：音频在项目目录里，用 `voiceover_export` 拿路径。要续跑失败的章节，
+对同一份源文再执行一次 `voiceover_create` 即可（项目 ID 由内容哈希决定，已完成的章节会跳过）。

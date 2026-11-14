@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { httpCompleter } from "./llm.js";
+import { PanelRoute } from "./panel.js";
 import { runProject, projectKey } from "./pipeline.js";
 import { readJson } from "./util.js";
 export const name = 'dsh-voiceover';
@@ -106,7 +107,11 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
             render: (_args, value) => [
                 {
                     type: 'text',
-                    text: `Voiceover project ${value.projectId} started. Directory: ${value.projectDir}. Poll voiceover_status for per-chapter progress.`,
+                    text: [
+                        `Voiceover project ${value.projectId ?? ''} started. Directory: ${value.projectDir ?? ''}. Poll voiceover_status for per-chapter progress.`,
+                        // Stable token the conversation panel parses to poll its JSON route.
+                        `projectId: ${value.projectId ?? ''}`,
+                    ].join('\n'),
                 },
             ],
         },
@@ -191,6 +196,7 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
                 {
                     type: 'text',
                     text: [
+                        `projectId: ${value.projectId ?? ''}`,
                         `${value.done}/${value.total} chapters done.`,
                         ...(value.chapters ?? []).map((chapter) => `${chapter.id ?? ''} ${chapter.title ?? ''} - ${chapter.status ?? 'unknown'}${chapter.error === undefined ? '' : ` (${chapter.error})`}`),
                         ...((value.warnings ?? []).length === 0 ? [] : ['Warnings:', ...(value.warnings ?? []).map((warning) => `- ${warning}`)]),
@@ -265,10 +271,39 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
     });
     return [create, status, exportTool];
 }
+/** Mount the read-only panel endpoint behind the host connection fence. */
+function mountPanel(ctx, config, env = process.env) {
+    const route = new PanelRoute({
+        outputDir: resolveOutputDir(config, env),
+        connection: serviceOf(ctx, 'connection'),
+        debug: (message) => {
+            const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined;
+            logger?.debug?.(message);
+        },
+    });
+    const register = (registrar) => {
+        ctx.effect(() => route.register(registrar));
+    };
+    // The Web host provides `webServer`; older hosts exposed the same router as
+    // `httpServer`. Without either (headless, file://), the panel simply does not
+    // render and the tools still work.
+    const web = serviceOf(ctx, 'webServer') ?? serviceOf(ctx, 'httpServer');
+    if (web !== undefined) {
+        register(web);
+        return;
+    }
+    ctx.inject(['webServer'], (webCtx) => {
+        const late = webCtx.webServer;
+        if (late === undefined)
+            return;
+        register(late);
+    });
+}
 /** Mount the tools. Registration is fiber-owned, so unloading cleans up. */
 export function apply(ctx, config = {}) {
     for (const tool of createVoiceoverTools(ctx, config)) {
         ctx.tools.register(tool);
     }
+    mountPanel(ctx, config);
 }
 //# sourceMappingURL=index.js.map

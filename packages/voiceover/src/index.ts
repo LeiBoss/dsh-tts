@@ -12,6 +12,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { httpCompleter, type Completer } from './llm.ts'
+import { PanelRoute, type ConnectionFence, type HttpRouteRegistrar } from './panel.ts'
 import { runProject, projectKey, type PipelineDeps, type ProjectState, type StyleProfile } from './pipeline.ts'
 import type { SynthResult, Synthesizer } from './types.ts'
 import { readJson } from './util.ts'
@@ -164,7 +165,11 @@ export function createVoiceoverTools(
       render: (_args, value) => [
         {
           type: 'text' as const,
-          text: `Voiceover project ${value.projectId} started. Directory: ${value.projectDir}. Poll voiceover_status for per-chapter progress.`,
+          text: [
+            `Voiceover project ${value.projectId ?? ''} started. Directory: ${value.projectDir ?? ''}. Poll voiceover_status for per-chapter progress.`,
+            // Stable token the conversation panel parses to poll its JSON route.
+            `projectId: ${value.projectId ?? ''}`,
+          ].join('\n'),
         },
       ],
     },
@@ -254,6 +259,7 @@ export function createVoiceoverTools(
         {
           type: 'text' as const,
           text: [
+            `projectId: ${value.projectId ?? ''}`,
             `${value.done}/${value.total} chapters done.`,
             ...(value.chapters ?? []).map(
               (chapter) =>
@@ -334,9 +340,40 @@ export function createVoiceoverTools(
   return [create, status, exportTool]
 }
 
+/** Mount the read-only panel endpoint behind the host connection fence. */
+function mountPanel(ctx: Context, config: VoiceoverConfig, env: NodeJS.ProcessEnv = process.env): void {
+  const route = new PanelRoute({
+    outputDir: resolveOutputDir(config, env),
+    connection: serviceOf<ConnectionFence>(ctx, 'connection'),
+    debug: (message) => {
+      const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined
+      logger?.debug?.(message)
+    },
+  })
+
+  const register = (registrar: HttpRouteRegistrar): void => {
+    ctx.effect(() => route.register(registrar))
+  }
+
+  // The Web host provides `webServer`; older hosts exposed the same router as
+  // `httpServer`. Without either (headless, file://), the panel simply does not
+  // render and the tools still work.
+  const web = serviceOf<HttpRouteRegistrar>(ctx, 'webServer') ?? serviceOf<HttpRouteRegistrar>(ctx, 'httpServer')
+  if (web !== undefined) {
+    register(web)
+    return
+  }
+  ctx.inject(['webServer'], (webCtx) => {
+    const late = (webCtx as unknown as { webServer?: HttpRouteRegistrar }).webServer
+    if (late === undefined) return
+    register(late)
+  })
+}
+
 /** Mount the tools. Registration is fiber-owned, so unloading cleans up. */
 export function apply(ctx: Context, config: VoiceoverConfig = {}): void {
   for (const tool of createVoiceoverTools(ctx, config)) {
     ctx.tools.register(tool)
   }
+  mountPanel(ctx, config)
 }

@@ -278,6 +278,9 @@ export async function runProject(deps, options) {
         warnings,
         createdAt: existing?.createdAt ?? now().toISOString(),
     };
+    // Persist the plan before the first chapter runs, so the conversation panel
+    // can show progress instead of a missing-state 404 during chapter one.
+    await writeJsonAtomic(paths(projectDir).state, state);
     const chaptersById = new Map(outline.chapters.map((chapter) => [chapter.id, chapter]));
     const ordered = [...outline.chapters].sort((a, b) => a.sourceRange[0] - b.sourceRange[0]);
     const skipped = [];

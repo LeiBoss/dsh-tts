@@ -1,7 +1,11 @@
-# Mounts the engine and the product in one install. The engine id is prefixed
-# so it never collides with a standalone @leiboss/dsh-tts install.
+# Mounts the engine and the product in one install.
+#
+# The engine entry deliberately reuses the engine bundle's own id (`dsh-tts`), so
+# installing both `@leiboss/dsh-tts` and `@leiboss/dsh-voiceover` merges into one
+# entry instead of mounting the engine twice (two `ctx.provide('tts')` calls in
+# one scope would throw on the second one).
 - insert:
-    - id: voiceover-tts
+    - id: dsh-tts
       name: '@leiboss/dsh-tts'
       config: {}
     - id: dsh-voiceover

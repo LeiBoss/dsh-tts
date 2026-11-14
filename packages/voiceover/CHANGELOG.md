@@ -2,6 +2,18 @@
 
 ## 0.1.0
 
+- Conversation panel: a client view for `voiceover_create` / `voiceover_status` that
+  polls a read-only host route (`GET /voiceover/panel/<projectId>.json`) and shows
+  progress, per-chapter status, durations, subtitles and degradation warnings.
+- The panel route sits behind the host connection fence and exposes no script text
+  or filesystem paths.
+- Persist the plan state before the first chapter runs, so the panel shows progress
+  instead of a 404 during chapter one.
+
+- The bundle patch inserts the engine with the engine bundle's own id
+  (`dsh-tts`), so installing both packages merges into one mount instead of
+  publishing `ctx.tts` twice.
+
 - First cut of the voiceover pipeline: chapter planning (block map + outline
   reduce), spoken-script adaptation, audit with one repair round, synthesis via
   `ctx.tts`, subtitle alignment, and a schema-validated manifest.
