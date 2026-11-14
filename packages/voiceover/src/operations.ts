@@ -77,7 +77,14 @@ export async function loadRerunPlan(
  */
 export async function rerunProject(
   deps: PipelineDeps,
-  input: { outputDir: string; projectId: string; auditSample?: number; signal?: AbortSignal },
+  input: {
+    outputDir: string
+    projectId: string
+    auditSample?: number
+    signal?: AbortSignal
+    /** Restrict the rerun to these chapters; omitted means "every unfinished one". */
+    chapters?: readonly string[]
+  },
 ): Promise<RerunResult> {
   const loaded = await loadRerunPlan(input.outputDir, input.projectId)
   if (loaded === undefined) throw new Error(`Unknown project: ${input.projectId}`)
@@ -93,6 +100,7 @@ export async function rerunProject(
     network: plan.network,
     auditSample: input.auditSample ?? 2,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.chapters === undefined ? {} : { only: input.chapters }),
   })
 
   if (result.projectId !== input.projectId) {

@@ -35,5 +35,7 @@ export declare function rerunProject(deps: PipelineDeps, input: {
     projectId: string;
     auditSample?: number;
     signal?: AbortSignal;
+    /** Restrict the rerun to these chapters; omitted means "every unfinished one". */
+    chapters?: readonly string[];
 }): Promise<RerunResult>;
 //# sourceMappingURL=operations.d.ts.map

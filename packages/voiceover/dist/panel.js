@@ -1,6 +1,30 @@
 import { projectSnapshot } from "./snapshot.js";
 /** Path prefix owned by this plugin. */
 export const PANEL_ROUTE_PREFIX = '/voiceover/panel';
+/** Read a small JSON body; undefined means "sent something unusable". */
+async function readJsonBody(req) {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+        const buffer = chunk;
+        size += buffer.length;
+        // A rerun request carries one chapter id at most.
+        if (size > 64 * 1024)
+            return undefined;
+        chunks.push(buffer);
+    }
+    if (chunks.length === 0)
+        return {};
+    try {
+        const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        return typeof value === 'object' && value !== null && !Array.isArray(value)
+            ? value
+            : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
 /** Serve one project's persisted progress as JSON. */
 export class PanelRoute {
     options;
@@ -69,10 +93,20 @@ export class PanelRoute {
                 this.answer(res, 404, { error: 'unknown project' });
                 return;
             }
+            const body = await readJsonBody(req);
+            if (body === undefined) {
+                this.answer(res, 400, { error: 'invalid JSON body' });
+                return;
+            }
+            const chapter = typeof body.chapter === 'string' ? body.chapter : undefined;
+            if (chapter !== undefined && !/^ch-[0-9]{2,3}$/.test(chapter)) {
+                this.answer(res, 400, { error: 'chapter must look like ch-03' });
+                return;
+            }
             try {
-                await onRerun(projectId);
+                await onRerun(projectId, chapter);
                 this.options.debug?.(`panel rerun requested ${projectId}`);
-                this.answer(res, 202, { ok: true, projectId });
+                this.answer(res, 202, { ok: true, projectId, ...(chapter === undefined ? {} : { chapter }) });
             }
             catch (error) {
                 this.answer(res, 500, {

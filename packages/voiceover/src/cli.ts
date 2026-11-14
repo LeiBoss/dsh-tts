@@ -236,9 +236,16 @@ export async function start(options: Options): Promise<{ server: ReturnType<type
       }
       return { projectId }
     },
-    async rerunProject(projectId) {
+    async rerunProject(projectId, chapter) {
       if (running.has(projectId)) return
-      track(projectId, rerunProject(deps, { outputDir: options.outputDir, projectId }))
+      track(
+        projectId,
+        rerunProject(deps, {
+          outputDir: options.outputDir,
+          projectId,
+          ...(chapter === undefined ? {} : { chapters: [chapter] }),
+        }),
+      )
     },
     async doctor() {
       return engine.doctor()

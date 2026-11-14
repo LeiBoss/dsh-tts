@@ -14,7 +14,7 @@ export interface PanelRouteOptions {
      * Resume a project. The panel's button and the `voiceover_rerun` Tool both
      * call the same implementation through this hook.
      */
-    onRerun?: (projectId: string) => void | Promise<void>;
+    onRerun?: (projectId: string, chapter?: string) => void | Promise<void>;
     debug?: (message: string) => void;
 }
 /** Serve one project's persisted progress as JSON. */

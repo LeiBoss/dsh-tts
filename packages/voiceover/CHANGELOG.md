@@ -2,6 +2,11 @@
 
 ## 0.3.0
 
+- Single-chapter rerun: `voiceover_rerun({ chapter })`, the per-row retry button and
+  `POST /v1/projects/:id/rerun {"chapter":"ch-03"}` all narrow the same operation.
+  Untargeted chapters keep their artifacts; an unknown id fails instead of doing
+  nothing.
+
 - The daemon answers `429` with `Retry-After` when the engine is throttled, so a
   caller backs off instead of treating a busy upstream as a bad request.
 

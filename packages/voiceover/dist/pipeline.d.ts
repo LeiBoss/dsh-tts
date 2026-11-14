@@ -26,6 +26,11 @@ export interface ProjectOptions {
     signal?: AbortSignal;
     /** Force a stage to run again even when the hashes match. */
     rerun?: 'source' | 'script' | 'synth';
+    /**
+     * Process only these chapters. Every other chapter keeps its recorded state
+     * untouched, which is what a single-chapter rerun needs.
+     */
+    only?: readonly string[];
 }
 /** Persisted per-project state (never part of the manifest contract). */
 export interface ProjectState {

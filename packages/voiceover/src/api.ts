@@ -35,7 +35,7 @@ export interface ApiContext {
     rate?: string
     style?: StyleProfile
   }): Promise<{ projectId: string }>
-  rerunProject(projectId: string): Promise<void>
+  rerunProject(projectId: string, chapter?: string): Promise<void>
   doctor(): Promise<unknown>
 }
 
@@ -306,9 +306,15 @@ export async function handleRequest(context: ApiContext, request: ApiRequest): P
     if (rest === '/rerun' && request.method === 'POST') {
       const snapshot = await projectSnapshot(context.outputDir, projectId)
       if (snapshot === undefined) return json(404, { error: 'unknown project' })
+      const body = parseJson(request.body)
+      if (body === undefined) return json(400, { error: 'invalid JSON body' })
+      const chapter = typeof body.chapter === 'string' ? body.chapter : undefined
+      if (chapter !== undefined && !CHAPTER.test(chapter)) {
+        return json(400, { error: 'chapter must look like ch-03' })
+      }
       try {
-        await context.rerunProject(projectId)
-        return json(202, { ok: true, projectId })
+        await context.rerunProject(projectId, chapter)
+        return json(202, { ok: true, projectId, ...(chapter === undefined ? {} : { chapter }) })
       } catch (error) {
         return json(422, { error: error instanceof Error ? error.message.slice(0, 300) : 'rerun failed' })
       }

@@ -53,6 +53,11 @@ export interface ProjectOptions {
   signal?: AbortSignal
   /** Force a stage to run again even when the hashes match. */
   rerun?: 'source' | 'script' | 'synth'
+  /**
+   * Process only these chapters. Every other chapter keeps its recorded state
+   * untouched, which is what a single-chapter rerun needs.
+   */
+  only?: readonly string[]
 }
 
 /** Persisted per-project state (never part of the manifest contract). */
@@ -440,7 +445,16 @@ export async function runProject(deps: PipelineDeps, options: ProjectOptions): P
   const ordered = [...outline.chapters].sort((a, b) => a.sourceRange[0] - b.sourceRange[0])
   const skipped: string[] = []
 
+  // A typo in a chapter id must fail loudly, not silently re-run nothing.
+  if (options.only !== undefined) {
+    const known = new Set(ordered.map((chapter) => chapter.id))
+    const unknown = options.only.filter((id) => !known.has(id))
+    if (unknown.length > 0) throw new Error(`Unknown chapter(s): ${unknown.join(', ')}`)
+  }
+
   for (const [index, chapter] of ordered.entries()) {
+    // Not targeted: leave its recorded state and artifacts exactly as they are.
+    if (options.only !== undefined && !options.only.includes(chapter.id)) continue
     const previous = state.chapters.find((record) => record.id === chapter.id)
     const chapterText = paragraphs.slice(chapter.sourceRange[0], chapter.sourceRange[1] + 1).join('\n\n')
     const inputHash = chapterInputHash(chapterText, options.style)

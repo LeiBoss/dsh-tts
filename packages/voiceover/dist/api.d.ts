@@ -26,7 +26,7 @@ export interface ApiContext {
     }): Promise<{
         projectId: string;
     }>;
-    rerunProject(projectId: string): Promise<void>;
+    rerunProject(projectId: string, chapter?: string): Promise<void>;
     doctor(): Promise<unknown>;
 }
 /** One request, already read into memory. */

@@ -83,10 +83,11 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 对同一份源文再执行一次 `voiceover_create` 即可（项目 ID 由内容哈希决定，已完成的章节会跳过）。
 ## 续跑
 
-失败章节不必重建整个项目：
+失败章节不必重建整个项目，可以整项目续跑，也可以只重跑一章：
 
-- 对 agent 说「续跑这个项目」→ `voiceover_rerun`（参数 `projectId`）
-- 或直接点面板上的「重跑 N 章」
+- 整项目：对 agent 说「续跑这个项目」→ `voiceover_rerun`（只传 `projectId`），或点面板底部的「重跑 N 章」
+- 单章：`voiceover_rerun` 传 `chapter: "ch-03"`，或点该章行尾的「重试」
+- 未指定的章节保持原状（文件与状态都不动），id 写错会直接报错而不是静默什么也不做
 
 两条路径调用的是同一个宿主实现（`src/operations.ts` 的 `rerunProject`），面板按钮只是 POST
 `/voiceover/panel/<projectId>/rerun`。已完成的章节按内容哈希跳过，失败或缺失的重新跑；
@@ -100,7 +101,7 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 | `voiceover_create` | 建项目，立即返回 `projectId` |
 | `voiceover_status` | 查看逐章进度 |
 | `voiceover_export` | 返回音频、字幕、manifest 的绝对路径 |
-| `voiceover_rerun` | 续跑：跳过已完成章节，重跑失败章节 |
+| `voiceover_rerun` | 续跑：跳过已完成章节；传 `chapter` 时只重跑该章 |
 ## 本地 daemon
 
 ```powershell
@@ -119,7 +120,7 @@ node dist/serve-entry.js serve --port 7801 [--host 127.0.0.1] [--output <dir>]
 | POST | `/v1/voiceover` | 建项目 → `202 { projectId, statusUrl }`（`sourcePath` 或 `sourceText` 二选一） |
 | GET | `/v1/projects/:id` | 与面板同源的进度快照 |
 | GET | `/v1/projects/:id/manifest` | 完整 manifest |
-| POST | `/v1/projects/:id/rerun` | 续跑 → `202` |
+| POST | `/v1/projects/:id/rerun` | 续跑 → `202`；body 可选 `{"chapter":"ch-03"}` |
 | GET | `/v1/projects/:id/audio/:chapter.mp3` | 音频，支持 `Range`（206） |
 | GET | `/v1/projects/:id/subtitles/:chapter(.est).srt` | 字幕 |
 

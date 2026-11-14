@@ -78,9 +78,17 @@ function fakeResponse(): { res: ServerResponse; status: () => number; body: () =
   return { res, status: () => state.status, body: () => state.body }
 }
 
-/** Minimal request double. */
-function fakeRequest(url: string, method = 'GET'): IncomingMessage {
-  return { method, url, headers: {} } as unknown as IncomingMessage
+/** Minimal request double; iterable so the body can be read. */
+function fakeRequest(url: string, method = 'GET', body?: unknown): IncomingMessage {
+  const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))]
+  return {
+    method,
+    url,
+    headers: {},
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of payload) yield chunk
+    },
+  } as unknown as IncomingMessage
 }
 
 test('serves a snapshot with progress, chapters and warnings', async () => {
@@ -264,6 +272,43 @@ test('a failing rerun answers 500 with the reason instead of hanging', async () 
     await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST'), res)
     assert.equal(status(), 500)
     assert.match(JSON.parse(body()).error, /engine unavailable/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+test('the rerun route accepts a single chapter and rejects a malformed one', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+    const calls: [string, string | undefined][] = []
+    const route = new PanelRoute({
+      outputDir: root,
+      onRerun: (projectId, chapter) => {
+        calls.push([projectId, chapter])
+      },
+    })
+    const server = fakeServer()
+    route.register(server.server)
+
+    const one = fakeResponse()
+    await server.route.handler(
+      fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST', { chapter: 'ch-02' }),
+      one.res,
+    )
+    assert.equal(one.status(), 202)
+    assert.deepEqual(calls, [[PROJECT_ID, 'ch-02']])
+
+    const whole = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST', {}), whole.res)
+    assert.equal(whole.status(), 202)
+    assert.deepEqual(calls[1], [PROJECT_ID, undefined])
+
+    const bad = fakeResponse()
+    await server.route.handler(
+      fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST', { chapter: '../../etc' }),
+      bad.res,
+    )
+    assert.equal(bad.status(), 400)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

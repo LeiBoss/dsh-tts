@@ -209,3 +209,57 @@ test('chapter input hash changes with style, so a style switch reruns', () => {
   const text = '同一段正文'
   assert.notEqual(chapterInputHash(text, 'news'), chapterInputHash(text, 'lecture'))
 })
+
+test('only processes the requested chapter and leaves the others untouched', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vo-only-'))
+  try {
+    const options = {
+      outputDir: dir,
+      title: '测试文稿',
+      text: TEXT,
+      voice: 'zh-CN-XiaoxiaoNeural',
+      rate: '+0%',
+      style: 'news' as const,
+      network: true,
+    }
+    const first = await runProject({ completer: fakeCompleter(), synth: fakeSynthesizer({ failOn: ['方案与结论'] }) }, options)
+    assert.deepEqual(first.state.chapters.map((chapter) => chapter.status), ['done', 'failed'])
+    const firstScript = first.state.chapters[0]?.script?.hash
+
+    const second = await runProject(
+      { completer: fakeCompleter(), synth: fakeSynthesizer() },
+      { ...options, only: ['ch-02'] },
+    )
+
+    assert.deepEqual(second.skipped, [], 'untargeted chapters are not reported as hash-skips')
+    assert.deepEqual(second.state.chapters.map((chapter) => chapter.status), ['done', 'done'])
+    assert.equal(second.state.chapters[0]?.script?.hash, firstScript, 'ch-01 artifacts stay untouched')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('an unknown chapter id is rejected instead of silently doing nothing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vo-only-'))
+  try {
+    await assert.rejects(
+      () =>
+        runProject(
+          { completer: fakeCompleter(), synth: fakeSynthesizer() },
+          {
+            outputDir: dir,
+            title: 't',
+            text: TEXT,
+            voice: 'zh-CN-XiaoxiaoNeural',
+            rate: '+0%',
+            style: 'news',
+            network: true,
+            only: ['ch-09'],
+          },
+        ),
+      /Unknown chapter/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

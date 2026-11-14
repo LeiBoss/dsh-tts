@@ -136,3 +136,32 @@ test('refuses an unknown or malformed project id', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a chapter-scoped rerun touches only that chapter', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-rerun-one-'))
+  try {
+    const options = {
+      outputDir: root,
+      title: '续跑测试',
+      text: TEXT,
+      voice: 'zh-CN-XiaoxiaoNeural',
+      rate: '+0%',
+      style: 'news' as const,
+      network: true,
+    }
+    const first = await runProject({ completer: completer(), synth: synth({ needle: '方案' }) }, options)
+    assert.deepEqual(first.state.chapters.map((chapter) => chapter.status), ['done', 'failed'])
+    const firstScript = first.state.chapters[0]?.script?.hash
+
+    const second = await rerunProject(
+      { completer: completer(), synth: synth() },
+      { outputDir: root, projectId: first.projectId, chapters: ['ch-02'] },
+    )
+
+    assert.deepEqual(second.state.chapters.map((chapter) => chapter.status), ['done', 'done'])
+    assert.equal(second.state.chapters[0]?.script?.hash, firstScript)
+    assert.deepEqual(second.skipped, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

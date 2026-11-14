@@ -93,7 +93,7 @@ function pipelineDeps(ctx, config) {
  * Both callers (the `voiceover_rerun` Tool and the panel button) land here; the
  * operation itself lives in `operations.ts`, so neither path owns a copy.
  */
-function startRerun(ctx, config, outputDir, projectId) {
+function startRerun(ctx, config, outputDir, projectId, chapters) {
     if (inFlight.has(projectId))
         return;
     const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined;
@@ -101,6 +101,7 @@ function startRerun(ctx, config, outputDir, projectId) {
         outputDir,
         projectId,
         auditSample: config.auditSample ?? 2,
+        ...(chapters === undefined ? {} : { chapters }),
     });
     inFlight.set(projectId, run);
     void run
@@ -305,6 +306,10 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
         description: 'Resume a voiceover project: finished chapters are skipped, failed or missing ones run again. Returns immediately; poll voiceover_status.',
         parameters: {
             projectId: { type: 'string', required: true, description: 'Id returned by voiceover_create.' },
+            chapter: {
+                type: 'string',
+                description: 'Only this chapter, for example ch-03. Omit to resume every unfinished chapter.',
+            },
         },
         output: {
             schema: {
@@ -321,10 +326,13 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
                     text: [`Resuming project ${value.projectId ?? ''}.`, `projectId: ${value.projectId ?? ''}`].join('\n'),
                 },
             ],
-        },
-        async execute(args) {
+        }, async execute(args) {
             const projectId = args.projectId;
-            startRerun(ctx, config, outputDir, projectId);
+            const chapter = args.chapter;
+            if (chapter !== undefined && !/^ch-[0-9]{2,3}$/.test(chapter)) {
+                throw new Error('chapter must look like ch-03');
+            }
+            startRerun(ctx, config, outputDir, projectId, chapter === undefined ? undefined : [chapter]);
             return { projectId, status: 'running' };
         },
     });
@@ -358,7 +366,7 @@ function mountWebSurfaces(ctx, config, env = process.env) {
         outputDir,
         ...(connection === undefined ? {} : { connection }),
         audioUrlFor: (filePath) => audio.urlFor(filePath),
-        onRerun: (projectId) => startRerun(ctx, config, outputDir, projectId),
+        onRerun: (projectId, chapter) => startRerun(ctx, config, outputDir, projectId, chapter === undefined ? undefined : [chapter]),
         debug,
     });
     const register = (registrar) => {

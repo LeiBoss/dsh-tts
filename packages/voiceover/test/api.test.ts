@@ -286,3 +286,32 @@ test('maps upstream throttling to 429 with Retry-After', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+test('the daemon rerun accepts a chapter and rejects a malformed one', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-api-'))
+  try {
+    await seedProject(root)
+    const calls: string[] = []
+    const context = makeContext(root, {
+      async rerunProject(projectId, chapter) {
+        calls.push(`${projectId}:${chapter ?? 'all'}`)
+      },
+    })
+
+    const one = await handleRequest(
+      context,
+      request('POST', `/v1/projects/${PROJECT_ID}/rerun`, { body: { chapter: 'ch-02' } }),
+    )
+    assert.equal(one.status, 202)
+    assert.equal(jsonOf(one).chapter, 'ch-02')
+
+    const bad = await handleRequest(
+      context,
+      request('POST', `/v1/projects/${PROJECT_ID}/rerun`, { body: { chapter: 'nope' } }),
+    )
+    assert.equal(bad.status, 400)
+
+    assert.deepEqual(calls, [`${PROJECT_ID}:ch-02`])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

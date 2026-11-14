@@ -104,7 +104,7 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
       list: { display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' },
-      row: { display: 'grid', gridTemplateColumns: '8px 1fr auto 18px', alignItems: 'center', gap: 8, minHeight: 22 },
+      row: { display: 'grid', gridTemplateColumns: '8px 1fr auto auto', alignItems: 'center', gap: 8, minHeight: 22 },
       playBtn: {
         width: 18,
         height: 18,
@@ -117,6 +117,15 @@ window.__ModuleLoader__.load({
         lineHeight: '18px',
       },
       player: { width: '100%', height: 32 },
+      retryBtn: {
+        fontSize: FONT_META,
+        padding: '0 6px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        borderRadius: 6,
+        background: 'transparent',
+        color: 'var(--dsw-alias-brand-primary)',
+        cursor: 'pointer',
+      },
       actions: { display: 'flex', gap: 8 },
       action: {
         fontSize: FONT_META,
@@ -262,17 +271,28 @@ window.__ModuleLoader__.load({
         h('span', { style: { ...S.dot, background: tone } }),
         h('span', { style: S.rowTitle }, `${chapter.id} ${chapter.title}`),
         h('span', { style: chapter.error === undefined ? S.meta : { ...S.meta, color: 'var(--dsw-alias-state-error-primary)' } }, meta),
-        playable
+        chapter.status === 'failed'
           ? h('button',
               {
                 type: 'button',
-                style: S.playBtn,
-                'aria-label': `${props.playing ? '停止' : '播放'} ${chapter.id} ${chapter.title}`,
-                onClick: () => props.onPlay(chapter),
+                style: S.retryBtn,
+                'aria-label': `重跑 ${chapter.id} ${chapter.title}`,
+                disabled: props.retrying,
+                onClick: () => props.onRetry(chapter),
               },
-              props.playing ? '■' : '▶',
+              props.retrying ? '…' : '重试',
             )
-          : h('span'),
+          : playable
+            ? h('button',
+                {
+                  type: 'button',
+                  style: S.playBtn,
+                  'aria-label': `${props.playing ? '停止' : '播放'} ${chapter.id} ${chapter.title}`,
+                  onClick: () => props.onPlay(chapter),
+                },
+                props.playing ? '■' : '▶',
+              )
+            : h('span'),
       )
     }
 
@@ -319,6 +339,8 @@ window.__ModuleLoader__.load({
       // gets fresh progress without a second fetch path.
       const [nonce, setNonce] = react.useState(0)
       const [busy, setBusy] = react.useState(false)
+      // Which chapter is being retried; one at a time keeps the UI honest.
+      const [retrying, setRetrying] = react.useState(null)
 
       react.useEffect(() => {
         if (id === undefined) return undefined
@@ -456,6 +478,26 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // Per-chapter retry: the same route, narrowed to one chapter. The Tool
+      // reaches the same operation through `voiceover_rerun({ chapter })`.
+      const retryChapter = async (chapter) => {
+        if (retrying !== null) return
+        setRetrying(chapter.id)
+        try {
+          const res = await fetch(`/voiceover/panel/${id}/rerun`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ chapter: chapter.id }),
+          })
+          if (res.ok) setNonce((value) => value + 1)
+        } catch {
+          // A dead host is already reported by the poller.
+        } finally {
+          setRetrying(null)
+        }
+      }
+
       return h(
         'div',
         { style: S.card },
@@ -484,12 +526,14 @@ window.__ModuleLoader__.load({
                   key: chapter.id,
                   chapter,
                   playing: playing !== null && playing.id === chapter.id,
+                  retrying: retrying === chapter.id,
                   onPlay: (target) =>
                     setPlaying((current) =>
                       current !== null && current.id === target.id
                         ? null
                         : { id: target.id, url: target.audioUrl },
                     ),
+                  onRetry: (target) => void retryChapter(target),
                 }),
               ),
             ),
