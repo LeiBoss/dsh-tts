@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import type { Completer } from '../src/llm.ts'
-import { chapterInputHash, fallbackOutline, runProject } from '../src/pipeline.ts'
+import { chapterInputHash, fallbackOutline, normalizeSource, runProject } from '../src/pipeline.ts'
 import type { Synthesizer } from '../src/types.ts'
 import { validateManifest } from '../src/validate.ts'
 
@@ -259,6 +259,55 @@ test('an unknown chapter id is rejected instead of silently doing nothing', asyn
         ),
       /Unknown chapter/,
     )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+test('markdown syntax is stripped before anything is spoken', () => {
+  const normalized = normalizeSource(
+    ['# 标题', '', '这是**重点**，参见[文档](https://example.com/a)。', '', '```js', 'const x = 1', '```', '', '- 列表项', '> 引用'].join('\n'),
+  )
+  assert.equal(normalized.includes('#'), false)
+  assert.equal(normalized.includes('**'), false)
+  assert.equal(normalized.includes('https://'), false)
+  assert.equal(normalized.includes('const x = 1'), false)
+  assert.match(normalized, /重点/)
+  assert.match(normalized, /文档/)
+  assert.match(normalized, /列表项/)
+})
+
+test('fallback planning honours the chapter character target', () => {
+  const paragraphs = Array.from({ length: 20 }, () => '这是一段测试正文，用来确认分章目标是否生效。')
+  const wide = fallbackOutline({ title: 't', paragraphs, chapterChars: 400 })
+  const narrow = fallbackOutline({ title: 't', paragraphs, chapterChars: 100 })
+  assert.ok(narrow.chapters.length > wide.chapters.length, 'a smaller target must produce more chapters')
+  assert.ok(wide.chapters.length >= 2)
+})
+
+test('a failed chapter keeps the engine error code instead of CHAPTER_FAILED', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vo-err-'))
+  try {
+    const throttled = {
+      async synthesize() {
+        const error = new Error('Unexpected server response: 429')
+        Object.assign(error, { code: 'UPSTREAM_THROTTLED' })
+        throw error
+      },
+    }
+    const result = await runProject(
+      { completer: fakeCompleter(), synth: throttled },
+      {
+        outputDir: dir,
+        title: 't',
+        text: TEXT,
+        voice: 'zh-CN-XiaoxiaoNeural',
+        rate: '+0%',
+        style: 'news',
+        network: true,
+      },
+    )
+    assert.equal(result.state.chapters[0]?.status, 'failed')
+    assert.equal(result.state.chapters[0]?.error?.code, 'UPSTREAM_THROTTLED')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

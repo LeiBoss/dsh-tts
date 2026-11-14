@@ -24,7 +24,27 @@ const FALLBACK_CHAPTER_CHARS = 1400;
  * a trailing newline, and identity must survive that round trip.
  */
 export function normalizeSource(text) {
-    return splitParagraphs(text).join('\n\n');
+    return splitParagraphs(stripMarkup(text)).join('\n\n');
+}
+/**
+ * Remove Markdown syntax that must never be spoken.
+ *
+ * Without a model the pipeline reads the source as written, so `#`, `**` and
+ * link targets would otherwise be announced literally. The model path benefits
+ * too: it sees prose instead of punctuation noise.
+ */
+function stripMarkup(text) {
+    return text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+        .replace(/^\s{0,3}>\s?/gm, '')
+        .replace(/^\s*[-*+]\s+/gm, '')
+        .replace(/^\s*\|.*\|\s*$/gm, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
+        .replace(/`([^`]+)`/g, '$1');
 }
 /** Compute the resume key for one chapter. */
 export function chapterInputHash(text, style) {
@@ -59,7 +79,7 @@ export function fallbackOutline(input) {
     for (const [index, paragraph] of input.paragraphs.entries()) {
         chars += paragraph.length;
         const last = index === input.paragraphs.length - 1;
-        if (chars >= FALLBACK_CHAPTER_CHARS || last)
+        if (chars >= (input.chapterChars ?? FALLBACK_CHAPTER_CHARS) || last)
             flush(index);
     }
     if (chapters.length === 0) {
@@ -83,7 +103,7 @@ export async function planOutline(deps, input) {
     const budget = Math.max(2000, Math.min(8000, input.maxBlocks ?? 6000));
     if (deps.completer === undefined) {
         warnings.push('capability.llm=false: chapters were split by length, no spoken-script adaptation ran');
-        return { outline: fallbackOutline({ title: input.title, paragraphs }), warnings };
+        return { outline: fallbackOutline({ title: input.title, paragraphs, ...(input.chapterChars === undefined ? {} : { chapterChars: input.chapterChars }) }), warnings };
     }
     // P0a: one block at a time, so the model never sees the whole document.
     const blocks = [];
@@ -132,7 +152,7 @@ export async function planOutline(deps, input) {
     catch (error) {
         warnings.push(`outline merge failed (${String(error)}); fell back to length-based chapters`);
     }
-    return { outline: fallbackOutline({ title: input.title, paragraphs }), warnings };
+    return { outline: fallbackOutline({ title: input.title, paragraphs, ...(input.chapterChars === undefined ? {} : { chapterChars: input.chapterChars }) }), warnings };
 }
 /** Run stage P1 (and one repair round when the audit rejects the result). */
 export async function adaptChapter(deps, input) {
@@ -247,7 +267,7 @@ async function loadState(path, projectId) {
  */
 export async function runProject(deps, options) {
     const now = deps.now ?? (() => new Date());
-    const paragraphs = splitParagraphs(options.text);
+    const paragraphs = splitParagraphs(normalizeSource(options.text));
     if (paragraphs.length === 0)
         throw new Error('The source text is empty after normalization.');
     const paths = (dir) => projectPaths(dir);
@@ -276,7 +296,12 @@ export async function runProject(deps, options) {
         outline = validateOutline(existing.outline);
     }
     else {
-        const planned = await planOutline(deps, { title: options.title, paragraphs, maxBlocks: options.maxBlocks });
+        const planned = await planOutline(deps, {
+            title: options.title,
+            paragraphs,
+            ...(options.maxBlocks === undefined ? {} : { maxBlocks: options.maxBlocks }),
+            ...(options.chapterChars === undefined ? {} : { chapterChars: options.chapterChars }),
+        });
         outline = planned.outline;
         warnings = [...warnings, ...planned.warnings];
     }
@@ -423,7 +448,15 @@ export async function runProject(deps, options) {
             state.inputHashes[chapter.id] = inputHash;
         }
         catch (error) {
-            const code = error instanceof LlmError ? error.code : error instanceof ValidationError ? 'VALIDATION_FAILED' : 'CHAPTER_FAILED';
+            // Keep the engine's own code: mapping every synthesis failure to
+            // CHAPTER_FAILED hides the one thing the user can act on (throttling vs
+            // sandbox denial vs a broken endpoint).
+            const engineCode = typeof error.code === 'string' ? error.code : undefined;
+            const code = error instanceof LlmError
+                ? error.code
+                : error instanceof ValidationError
+                    ? 'VALIDATION_FAILED'
+                    : (engineCode ?? 'CHAPTER_FAILED');
             const retryable = error instanceof LlmError ? error.retryable : false;
             upsert({
                 ...record,

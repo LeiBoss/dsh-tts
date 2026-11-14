@@ -22,6 +22,7 @@ interface Options {
     llmBaseUrl?: string;
     llmModel: string;
     llmKey?: string;
+    chapterChars?: number;
 }
 /** Resolve options from flags, the environment, and defaults. */
 declare function resolveOptions(argv: readonly string[], env: NodeJS.ProcessEnv): Options;

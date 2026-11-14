@@ -104,6 +104,9 @@ window.__ModuleLoader__.load({
         'err.EMPTY_AUDIO': '返回空音频，可重试',
         'err.LLM_SCHEMA_INVALID': '改写结果不合格，已降级',
         'err.CHAPTER_FAILED': '本章失败，可重新创建续跑',
+        'err.UPSTREAM_THROTTLED': '配音服务限流，稍后重试',
+        'err.ALL_FALLBACKS_FAILED': '所有配音引擎都失败，检查网络或系统语音',
+        'err.ENGINE_UNAVAILABLE': '没有可用的配音引擎',
       },
       en: {
         'group.label': 'Voiceover progress',
@@ -168,6 +171,9 @@ window.__ModuleLoader__.load({
         'err.EMPTY_AUDIO': 'Empty audio returned; retry',
         'err.LLM_SCHEMA_INVALID': 'The rewrite failed validation and was degraded',
         'err.CHAPTER_FAILED': 'This chapter failed; recreate to resume',
+        'err.UPSTREAM_THROTTLED': 'The voice service is rate limiting; retry later',
+        'err.ALL_FALLBACKS_FAILED': 'Every voice engine failed; check the network or the system voice',
+        'err.ENGINE_UNAVAILABLE': 'No voice engine is available',
       },
     }
 

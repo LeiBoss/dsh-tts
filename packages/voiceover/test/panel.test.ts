@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -309,6 +309,26 @@ test('the rerun route accepts a single chapter and rejects a malformed one', asy
       bad.res,
     )
     assert.equal(bad.status(), 400)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+test('snapshot reports the timing quality the chapters actually have', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+    const statePath = join(root, PROJECT_ID, 'state', 'state.json')
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {
+      capability: { timingQuality: string }
+    }
+    // Planning-time guess: the state says "estimated" although the finished
+    // chapter was measured exactly. The snapshot must trust the chapters.
+    state.capability.timingQuality = 'estimated'
+    await writeFile(statePath, JSON.stringify(state), 'utf8')
+
+    const route = new PanelRoute({ outputDir: root })
+    const snapshot = await route.snapshot(PROJECT_ID)
+    assert.equal(snapshot?.capability.timingQuality, 'exact')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

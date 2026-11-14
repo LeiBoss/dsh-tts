@@ -82,6 +82,9 @@ function parseArgs(argv) {
             case '--llm-key':
                 parsed.llmKey = next();
                 break;
+            case '--chapter-chars':
+                parsed.chapterChars = Number(next());
+                break;
             default:
                 if (arg !== undefined && arg.startsWith('-'))
                     throw new Error(`unknown option: ${arg}`);
@@ -106,6 +109,7 @@ function resolveOptions(argv, env) {
         rate: parsed.rate ?? '+0%',
         style,
         llmModel: parsed.llmModel ?? 'deepseek-chat',
+        ...(parsed.chapterChars === undefined ? {} : { chapterChars: parsed.chapterChars }),
         ...(parsed.llmBaseUrl === undefined ? {} : { llmBaseUrl: parsed.llmBaseUrl }),
         ...(parsed.llmKey === undefined && env.DSH_VOICEOVER_LLM_KEY === undefined
             ? {}
@@ -207,6 +211,7 @@ export async function start(options) {
                     rate,
                     style,
                     network: true,
+                    ...(options.chapterChars === undefined ? {} : { chapterChars: options.chapterChars }),
                 }));
             }
             return { projectId };

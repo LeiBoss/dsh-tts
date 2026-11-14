@@ -38,6 +38,7 @@ export const Config = z.object({
   llmApiKey: z.string().description('API key for the model endpoint.'),
   llmModel: z.string().default('deepseek-chat').description('Model name recorded in the manifest.'),
   trustedHosts: z.array(z.string()).description('Extra Host names accepted by the audio route (reverse proxies).'),
+  chapterChars: z.number().default(1400).description('Target characters per chapter when planning without a model.'),
 })
 
 /** Config accepted by {@link apply}. */
@@ -52,6 +53,8 @@ export interface VoiceoverConfig {
   llmModel?: string
   /** Extra Host names accepted by the audio route (reverse proxies). */
   trustedHosts?: string[]
+  /** Target characters per chapter when planning without a model. */
+  chapterChars?: number
 }
 
 /** Resolve the project root without requiring DSH_HOME. */
@@ -248,6 +251,7 @@ export function createVoiceoverTools(
           style,
           network: true,
           auditSample: config.auditSample ?? 2,
+          ...(config.chapterChars === undefined ? {} : { chapterChars: config.chapterChars }),
         })
         inFlight.set(projectId, run)
         void run

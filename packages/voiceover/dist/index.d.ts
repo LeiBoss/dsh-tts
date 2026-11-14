@@ -23,6 +23,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     llmApiKey: z<string, string, "plain">;
     llmModel: z<string, string, "defined">;
     trustedHosts: z<string[], string[], "plain">;
+    chapterChars: z<number, number, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     outputDir: z<string, string, "plain">;
     defaultVoice: z<string, string, "defined">;
@@ -33,6 +34,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     llmApiKey: z<string, string, "plain">;
     llmModel: z<string, string, "defined">;
     trustedHosts: z<string[], string[], "plain">;
+    chapterChars: z<number, number, "defined">;
 }>>, "plain">;
 /** Config accepted by {@link apply}. */
 export interface VoiceoverConfig {
@@ -46,6 +48,8 @@ export interface VoiceoverConfig {
     llmModel?: string;
     /** Extra Host names accepted by the audio route (reverse proxies). */
     trustedHosts?: string[];
+    /** Target characters per chapter when planning without a model. */
+    chapterChars?: number;
 }
 /** Tool definitions; separated so tests can inspect them without a host. */
 export declare function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env?: NodeJS.ProcessEnv): ToolDefinition[];

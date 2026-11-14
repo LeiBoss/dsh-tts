@@ -58,6 +58,8 @@ export interface ProjectOptions {
    * untouched, which is what a single-chapter rerun needs.
    */
   only?: readonly string[]
+  /** Target characters per chapter when planning without a model. */
+  chapterChars?: number
 }
 
 /** Persisted per-project state (never part of the manifest contract). */
@@ -98,7 +100,28 @@ const FALLBACK_CHAPTER_CHARS = 1400
  * a trailing newline, and identity must survive that round trip.
  */
 export function normalizeSource(text: string): string {
-  return splitParagraphs(text).join('\n\n')
+  return splitParagraphs(stripMarkup(text)).join('\n\n')
+}
+
+/**
+ * Remove Markdown syntax that must never be spoken.
+ *
+ * Without a model the pipeline reads the source as written, so `#`, `**` and
+ * link targets would otherwise be announced literally. The model path benefits
+ * too: it sees prose instead of punctuation noise.
+ */
+function stripMarkup(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}>\s?/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\|.*\|\s*$/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
 }
 /** Compute the resume key for one chapter. */
 export function chapterInputHash(text: string, style: StyleProfile): string {
@@ -114,7 +137,7 @@ export function projectKey(input: { text: string; voice: string; rate: string; s
  * Deterministic outline when no model is available: pack paragraphs into
  * chapters of roughly {@link FALLBACK_CHAPTER_CHARS} characters.
  */
-export function fallbackOutline(input: { title: string; paragraphs: string[] }): Outline {
+export function fallbackOutline(input: { title: string; paragraphs: string[]; chapterChars?: number }): Outline {
   const chapters: OutlineChapter[] = []
   let start = 0
   let chars = 0
@@ -137,7 +160,7 @@ export function fallbackOutline(input: { title: string; paragraphs: string[] }):
   for (const [index, paragraph] of input.paragraphs.entries()) {
     chars += paragraph.length
     const last = index === input.paragraphs.length - 1
-    if (chars >= FALLBACK_CHAPTER_CHARS || last) flush(index)
+    if (chars >= (input.chapterChars ?? FALLBACK_CHAPTER_CHARS) || last) flush(index)
   }
 
   if (chapters.length === 0) {
@@ -159,7 +182,7 @@ function blockText(paragraphs: readonly string[], from: number, to: number): str
 /** Plan chapters with the model, verifying coverage and falling back on failure. */
 export async function planOutline(
   deps: PipelineDeps,
-  input: { title: string; paragraphs: string[]; maxBlocks?: number },
+  input: { title: string; paragraphs: string[]; maxBlocks?: number; chapterChars?: number },
 ): Promise<{ outline: Outline; warnings: string[] }> {
   const warnings: string[] = []
   const paragraphs = input.paragraphs
@@ -168,7 +191,7 @@ export async function planOutline(
 
   if (deps.completer === undefined) {
     warnings.push('capability.llm=false: chapters were split by length, no spoken-script adaptation ran')
-    return { outline: fallbackOutline({ title: input.title, paragraphs }), warnings }
+    return { outline: fallbackOutline({ title: input.title, paragraphs, ...(input.chapterChars === undefined ? {} : { chapterChars: input.chapterChars }) }), warnings }
   }
 
   // P0a: one block at a time, so the model never sees the whole document.
@@ -221,7 +244,7 @@ export async function planOutline(
     warnings.push(`outline merge failed (${String(error)}); fell back to length-based chapters`)
   }
 
-  return { outline: fallbackOutline({ title: input.title, paragraphs }), warnings }
+  return { outline: fallbackOutline({ title: input.title, paragraphs, ...(input.chapterChars === undefined ? {} : { chapterChars: input.chapterChars }) }), warnings }
 }
 
 /** Result of adapting one chapter. */
@@ -389,7 +412,7 @@ async function loadState(path: string, projectId: string): Promise<ProjectState 
  */
 export async function runProject(deps: PipelineDeps, options: ProjectOptions): Promise<ProjectResult> {
   const now = deps.now ?? (() => new Date())
-  const paragraphs = splitParagraphs(options.text)
+  const paragraphs = splitParagraphs(normalizeSource(options.text))
   if (paragraphs.length === 0) throw new Error('The source text is empty after normalization.')
 
   const paths = (dir: string): ReturnType<typeof projectPaths> => projectPaths(dir)
@@ -419,7 +442,12 @@ export async function runProject(deps: PipelineDeps, options: ProjectOptions): P
   if (existing !== undefined && options.rerun !== 'source') {
     outline = validateOutline(existing.outline)
   } else {
-    const planned = await planOutline(deps, { title: options.title, paragraphs, maxBlocks: options.maxBlocks })
+    const planned = await planOutline(deps, {
+      title: options.title,
+      paragraphs,
+      ...(options.maxBlocks === undefined ? {} : { maxBlocks: options.maxBlocks }),
+      ...(options.chapterChars === undefined ? {} : { chapterChars: options.chapterChars }),
+    })
     outline = planned.outline
     warnings = [...warnings, ...planned.warnings]
   }
@@ -576,7 +604,17 @@ export async function runProject(deps: PipelineDeps, options: ProjectOptions): P
 
       state.inputHashes[chapter.id] = inputHash
     } catch (error) {
-      const code = error instanceof LlmError ? error.code : error instanceof ValidationError ? 'VALIDATION_FAILED' : 'CHAPTER_FAILED'
+      // Keep the engine's own code: mapping every synthesis failure to
+      // CHAPTER_FAILED hides the one thing the user can act on (throttling vs
+      // sandbox denial vs a broken endpoint).
+      const engineCode =
+        typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : undefined
+      const code =
+        error instanceof LlmError
+          ? error.code
+          : error instanceof ValidationError
+            ? 'VALIDATION_FAILED'
+            : (engineCode ?? 'CHAPTER_FAILED')
       const retryable = error instanceof LlmError ? error.retryable : false
       upsert({
         ...record,

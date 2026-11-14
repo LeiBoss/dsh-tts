@@ -34,6 +34,7 @@ interface Options {
   llmBaseUrl?: string
   llmModel: string
   llmKey?: string
+  chapterChars?: number
 }
 
 const USAGE = `Usage: dsh-voiceover [serve] [options]
@@ -99,6 +100,9 @@ function parseArgs(argv: readonly string[]): Partial<Options> & { help?: boolean
       case '--llm-key':
         parsed.llmKey = next()
         break
+      case '--chapter-chars':
+        parsed.chapterChars = Number(next())
+        break
       default:
         if (arg !== undefined && arg.startsWith('-')) throw new Error(`unknown option: ${arg}`)
     }
@@ -123,6 +127,7 @@ function resolveOptions(argv: readonly string[], env: NodeJS.ProcessEnv): Option
     rate: parsed.rate ?? '+0%',
     style,
     llmModel: parsed.llmModel ?? 'deepseek-chat',
+    ...(parsed.chapterChars === undefined ? {} : { chapterChars: parsed.chapterChars }),
     ...(parsed.llmBaseUrl === undefined ? {} : { llmBaseUrl: parsed.llmBaseUrl }),
     ...(parsed.llmKey === undefined && env.DSH_VOICEOVER_LLM_KEY === undefined
       ? {}
@@ -231,6 +236,7 @@ export async function start(options: Options): Promise<{ server: ReturnType<type
             rate,
             style,
             network: true,
+            ...(options.chapterChars === undefined ? {} : { chapterChars: options.chapterChars }),
           }),
         )
       }

@@ -38,7 +38,21 @@ export async function projectSnapshot(outputDir, projectId, options = {}) {
         total: state.outline.chapters.length,
         pending: Math.max(0, state.outline.chapters.length - done - failed),
         failed,
-        capability: state.capability,
+        // The state records what was true when planning started; the chapters know
+        // the truth now. Reporting the stale value would make the panel claim
+        // "estimated" while every chapter has exact timing.
+        capability: {
+            ...state.capability,
+            timingQuality: chapters.length === 0
+                ? state.capability.timingQuality
+                : done === 0
+                    ? 'none'
+                    : chapters
+                        .filter((chapter) => chapter.status === 'done')
+                        .every((chapter) => chapter.audio?.timingQuality === 'exact')
+                        ? 'exact'
+                        : 'estimated',
+        },
         engine: state.engine,
         chapters: chapters.map((chapter) => {
             const row = {

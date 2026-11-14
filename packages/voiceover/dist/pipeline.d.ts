@@ -31,6 +31,8 @@ export interface ProjectOptions {
      * untouched, which is what a single-chapter rerun needs.
      */
     only?: readonly string[];
+    /** Target characters per chapter when planning without a model. */
+    chapterChars?: number;
 }
 /** Persisted per-project state (never part of the manifest contract). */
 export interface ProjectState {
@@ -81,12 +83,14 @@ export declare function projectKey(input: {
 export declare function fallbackOutline(input: {
     title: string;
     paragraphs: string[];
+    chapterChars?: number;
 }): Outline;
 /** Plan chapters with the model, verifying coverage and falling back on failure. */
 export declare function planOutline(deps: PipelineDeps, input: {
     title: string;
     paragraphs: string[];
     maxBlocks?: number;
+    chapterChars?: number;
 }): Promise<{
     outline: Outline;
     warnings: string[];
