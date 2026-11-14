@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Republished at 0.3.1 because 0.3.0's tarball sat in npm's post-publish processing
+  queue long enough that installs failed with a 404 on the tarball URL. Same
+  code as 0.3.0; only the version string differs.
+
 ## 0.3.0
 
 - Throttling is retried, not papered over: a 429 is classified as

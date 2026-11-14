@@ -1,6 +1,6 @@
 {
   "name": "@leiboss/dsh-tts",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Reliable TTS engine for DSH plugins: concurrency-safe synthesis, layered error semantics, chunked long-text, provider fallback, and an injectable ctx.tts service.",
   "license": "MIT",
   "author": "leiboss",

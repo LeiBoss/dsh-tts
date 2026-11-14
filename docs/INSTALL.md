@@ -13,7 +13,7 @@
 
 ## 1. 安装
 
-### A. 从 npm（发布后，推荐）
+### A. 从 npm（推荐）
 
 ```powershell
 dsh plugin --profile web add @leiboss/dsh-voiceover
@@ -28,10 +28,14 @@ dsh plugin --profile web add @leiboss/dsh-voiceover
 dsh plugin --profile web add @leiboss/dsh-tts
 ```
 
-### B. 从源码（当前仓库状态下的唯一可行方式）
+**刚发布后的两个坑**（都不是包的问题）：
 
-`@leiboss/dsh-tts@0.3.0` 与 `@leiboss/dsh-voiceover@0.3.0` 尚未发布到 npm，
-而后者依赖 `^0.3.0`，所以用 tarball 安装会在依赖解析处失败。用目录 link 绕开：
+| 报错 | 原因 | 处理 |
+|---|---|---|
+| `ERR_PNPM_NO_MATCHING_VERSION` | 你的 npm/pnpm 走国内镜像（如 `registry.npmmirror.com`），新版本还没同步 | 加官方源：`dsh plugin --profile web add @leiboss/dsh-voiceover --registry https://registry.npmjs.org/` |
+| `ERR_PNPM_FETCH_404 … .tgz` | npm 的发布处理队列，tarball 要几分钟才可下载 | 等几分钟；`scripts/publish.ps1` 会轮询 tarball 而不是只看元数据 |
+
+### B. 从源码（想改代码时）
 
 ```powershell
 git clone https://github.com/leiboss/dsh-tts.git
@@ -141,7 +145,7 @@ powershell -File scripts\publish.ps1 -Otp 123456
 发布前必须按顺序完成，否则别人装不上：
 
 1. `npm run build` + 两个包 `npm test` 全绿（Node ≥ 22.18）
-2. `npm publish --access public` **先发 `@leiboss/dsh-tts@0.3.0`**，再发 `@leiboss/dsh-voiceover@0.3.0`
+2. `powershell -File scripts\publish.ps1` **先发 `@leiboss/dsh-tts`**，再发 `@leiboss/dsh-voiceover`；脚本会轮询 tarball，因为元数据秒回、tarball 要几分钟
    —— 后者依赖前者的 `^0.3.0`，顺序反了会解析失败
 3. 验证：干净 profile 里 `dsh plugin add @leiboss/dsh-voiceover` 能装、能跑
 4. 上架索引站（dshbase / dshmarketplace / deepseekplugins），条目用 npm 包名
