@@ -2,6 +2,10 @@
 
 ## 0.3.0
 
+- The progress track had no background of its own (`bg-layer-2` is white in the
+  light theme), so the unfilled part was invisible and the bar read as a full
+  streak. It now uses the neutral step, which is visible in both themes.
+
 - Subtitles are now visible where they are actually used: the panel shows the
   current line under the player, synced to playback, and the host serves
   `/voiceover/panel/<id>/subtitles/<chapter>` (plus `.vtt` conversion for browser

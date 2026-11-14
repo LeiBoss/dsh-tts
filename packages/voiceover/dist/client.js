@@ -273,7 +273,13 @@ window.__ModuleLoader__.load({
       header: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
       title: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       count: { flex: 'none', fontSize: FONT_META, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' },
-      track: { height: 6, borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2)', overflow: 'hidden' },
+      // A white-on-white track is invisible; the neutral step is the same in every theme.
+      track: {
+        height: 6,
+        borderRadius: 999,
+        background: 'var(--dsw-static-neutral-bluish-100, #ebeef2)',
+        overflow: 'hidden',
+      },
       fill: {
         height: '100%',
         borderRadius: 999,

@@ -81,10 +81,19 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 （同一会话围栏，只返回进度，不返回稿件正文与文件路径）。首章规划期间显示「准备中」，
 不再误报接口不可用。
 
+![进度面板](../../docs/images/panel-progress.png)
+
+> 由 `scripts/render-panel-shots.mjs` 用真实组件代码与 DSH 主题 token 渲染，不是 App 内截图。
+
 **试听**：面板顶部有一个播放器，每章行尾的 `▶` 切换到该章；URL 是宿主签发的同源链接
 （`/voiceover/audio/...`，有效期 6 小时、与浏览器会话绑定），刷新进度不会打断播放。
 无 Web 宿主时不显示播放控件，用 `voiceover_export` 拿文件路径。要续跑失败的章节，
 对同一份源文再执行一次 `voiceover_create` 即可（项目 ID 由内容哈希决定，已完成的章节会跳过）。
+
+![试听与字幕](../../docs/images/panel-playing.png)
+
+播放时面板从 `GET /voiceover/panel/<id>/subtitles/<chapter>` 取当前章字幕，按播放进度逐句显示；
+同一路由加 `.vtt` 后缀返回 WebVTT，可给浏览器的 `<video><track>` 用。
 ## 续跑
 
 失败章节不必重建整个项目，可以整项目续跑，也可以只重跑一章：

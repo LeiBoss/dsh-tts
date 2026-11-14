@@ -14,6 +14,20 @@ DSH 音频能力，两个包：
 - [`docs/BUILD-PROMPTS.md`](docs/BUILD-PROMPTS.md) — 给 AI 编程代理的 M0–M6 实现提示词
 - [`docs/INSTALL.md`](docs/INSTALL.md) — **给别人用**：安装、首次上手、配置、常见问题、发布清单
 
+## 长什么样
+
+对话里的进度面板（进行中：五章完成、一章失败可重试、两章待跑）：
+
+![进度面板](docs/images/panel-progress.png)
+
+点某章试听，播放器下方实时显示当前字幕：
+
+![试听与字幕](docs/images/panel-playing.png)
+
+> 这两张图由 `scripts/render-panel-shots.mjs` 用**真实组件代码**（`packages/voiceover/client/client.js`）
+> 与 DSH 主题 token 渲染，**不是 App 内截图**。想要真机截图：在装了插件的 Web profile 里跑一篇文，
+> 截面板、播放、失败重试三处，覆盖 `docs/images/` 下同名文件即可。
+
 ## 开发
 
 需要 Node ≥ 22.18（`node --test` 直接跑 TypeScript 需要类型剥离）。
