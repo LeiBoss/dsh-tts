@@ -1,7 +1,7 @@
 import { TtsService } from "./service.js";
 /**
- * Mount `ctx.tts`. Returns the service when it is reachable through the host
- * registry, or undefined when the host has no service seam.
+ * Mount `ctx.tts`. Returns the service when it was registered, or undefined
+ * when the host has no service seam or the name was already taken.
  */
 export function mountTtsService(ctx, config) {
     const service = new TtsService(config, {
@@ -14,24 +14,19 @@ export function mountTtsService(ctx, config) {
     try {
         if (typeof host.provide === 'function') {
             host.provide('tts', service);
+            return service;
         }
-        else if (typeof host.set === 'function') {
+        if (typeof host.set === 'function') {
+            // Legacy fallback: only valid when a prior provider already registered
+            // the name. Never used on cordis 4.x, which always has `provide`.
             host.set('tts', service);
+            return service;
         }
-        else {
-            return undefined;
-        }
-        // Some cordis versions only declare the name and expect an assignment.
-        const registered = typeof host.get === 'function' ? host.get('tts') : undefined;
-        if (registered === undefined) {
-            ;
-            ctx.tts = service;
-        }
-        return service;
+        return undefined;
     }
-    catch {
+    catch (error) {
         const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-tts') : undefined;
-        logger?.warn?.('Could not expose ctx.tts; the tools are still registered.');
+        logger?.warn?.(`Could not expose ctx.tts (${error instanceof Error ? error.message : String(error)}); the tools are still registered.`);
         return undefined;
     }
 }

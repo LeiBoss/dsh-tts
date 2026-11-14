@@ -57,6 +57,10 @@ export async function synthesizeWithEdgeJs(request) {
         voice: request.voice,
         lang: languageOf(request.voice),
         outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+        // `saveSubtitles` gates *parsing* of the WordBoundary metadata, not file
+        // writes: `streamAudio()` yields the boundaries and never touches disk.
+        // Without it the generator yields audio only and timing stays estimated.
+        saveSubtitles: true,
         ...(request.proxy === undefined ? {} : { proxy: request.proxy }),
         ...(request.rate === undefined ? {} : { rate: request.rate }),
         ...(request.pitch === undefined ? {} : { pitch: request.pitch }),

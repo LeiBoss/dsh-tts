@@ -114,6 +114,10 @@ test('the service selects the pure-JS backend on auto and caches the result', as
     if (second.kind !== 'audio') return
     assert.equal(second.fromCache, true)
     assert.equal(second.filePath, first.filePath)
+    // A cache hit must keep the persisted word timings: losing them would
+    // silently downgrade subtitle timing from exact to estimated.
+    assert.ok(second.words !== undefined && second.words.length > 0)
+    assert.deepEqual(second.words, first.words)
   } finally {
     setEdgeJsLoader(undefined)
     await rm(dir, { recursive: true, force: true })

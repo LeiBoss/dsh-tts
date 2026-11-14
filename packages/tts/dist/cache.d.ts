@@ -24,6 +24,15 @@ export interface CacheMetadata {
     pitch: string;
     volume: string;
     createdAt: string;
+    /**
+     * Word timings the backend reported. Persisted so a later cache hit keeps
+     * exact subtitle timing instead of silently degrading to an estimate.
+     */
+    words?: {
+        text: string;
+        offsetMs: number;
+        durationMs: number;
+    }[];
 }
 /** Sidecar path for one audio file. */
 export declare function metadataPath(filePath: string): string;

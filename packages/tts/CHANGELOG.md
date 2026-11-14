@@ -2,6 +2,14 @@
 
 ## 0.3.0
 
+- The pure-JS backend now returns word boundaries: `node-edge-tts` only parses
+  `WordBoundary` metadata when `saveSubtitles` is set, and `streamAudio()` writes
+  no files, so the adapter enables it unconditionally.
+- Persist word timings in the cache sidecar and return them on a cache hit;
+  previously a cached chapter silently downgraded subtitles to `estimated`.
+- `capabilities.wordBoundaries` is now conservative (false until the backend is
+  resolved) instead of assuming a non-CLI engine.
+
 - Add the pure-JS backend (`src/engines/edge-js.ts`, optional `node-edge-tts`):
   no Python, and it returns word boundaries, which upgrades subtitle timing
   from `estimated` to `exact`. Word offsets are shifted per chunk so chunked

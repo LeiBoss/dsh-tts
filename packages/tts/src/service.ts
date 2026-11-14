@@ -184,7 +184,9 @@ export class TtsService {
   /** Static capabilities; never touches the network. */
   get capabilities(): TtsCapabilities {
     return {
-      wordBoundaries: this.engineKind !== 'edge-py',
+      // Conservative until the backend is resolved: only the pure-JS engine
+      // reports word boundaries, and `auto` may land on the CLI backend.
+      wordBoundaries: this.engineKind === 'edge-js',
       formats: ['mp3'],
       offline: isSapiSupported(),
     }
@@ -239,6 +241,7 @@ export class TtsService {
         timingQuality: facts.timingQuality,
         engine: metadata?.engine ?? 'edge-tts',
         fromCache: true,
+        ...(metadata?.words === undefined ? {} : { words: metadata.words }),
       }
     }
 
@@ -418,6 +421,7 @@ export class TtsService {
       pitch: identity.pitch,
       volume: identity.volume,
       createdAt: (this.deps.now?.() ?? new Date()).toISOString(),
+      ...(override.words === undefined ? {} : { words: override.words }),
     })
     return {
       kind: 'audio',
