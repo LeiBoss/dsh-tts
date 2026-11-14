@@ -1,0 +1,6 @@
+# Smoke probe for host-level integration: mounts after `tools` and `tts` exist,
+# records what the host actually resolved, and optionally synthesizes once.
+- insert:
+    - id: dsh-tts-host-probe
+      name: 'dsh-tts-host-probe'
+      config: {}

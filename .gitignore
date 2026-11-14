@@ -7,3 +7,7 @@ node_modules/
 # dist/ is intentionally committed for both packages: GitHub installs
 # (`dsh plugin add github:leiboss/dsh-tts`) must work without a build step.
 # Run `npm run build` after editing src/ and commit the regenerated dist/.
+
+# Host-probe build output (.pack holds npm pack tarballs and probe results).
+.pack/
+.probe-result.json

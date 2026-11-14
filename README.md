@@ -43,15 +43,25 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover  # 产品或引擎一�
 
 | 能力 | 状态 |
 |---|---|
-| 引擎服务化（`ctx.tts`） | 已实现 + 单测，宿主联调待做 |
+| 引擎服务化（`ctx.tts`） | 已实现 + 单测 + **宿主验证**（DSH 0.2.2-rc.1） |
 | 纯 JS 时长测量（MP3 帧解析） | 已实现 + 单测 |
 | 分章 / 改写 / 质检 / 合成 / 字幕 / manifest | 已实现 + 单测 |
 | 断点续跑（内容哈希） | 已实现 + 单测 |
-| 零依赖引擎（`edge-js`） | 已实现 + 单测：`auto` 默认优先，返回词边界 |
-| 进度面板（client UI） | 未实现 |
+| 宿主联调脚本 | [`scripts/host-probe/run.ps1`](scripts/host-probe/run.ps1) |
+| 零依赖引擎（`edge-js`） | 已实现 + 单测 + 宿主验证：真实合成、精确时长、词边界随缓存保留 |
+| 对话内进度面板（client） | 已实现：进度条、逐章状态、降级提示；暂无播放 |
 | `voiceover serve` / MCP | 未实现 |
 | zip / m4b 导出 | 未实现 |
 
 ## 许可
 
 MIT
+## 宿主联调
+
+一键复现（会建一个临时 headless profile，跑完自动删除）：
+
+```powershell
+pwsh -File scripts/host-probe/run.ps1
+```
+
+验证内容与失败修复记录见 [`docs/HOST-VERIFICATION.md`](docs/HOST-VERIFICATION.md)：服务挂载、bundle patch 按 id 合并、单次挂载、真实合成（`edge-js`、精确时长）、词边界随缓存命中保留。
