@@ -12,68 +12,14 @@
  * the project state file is readable.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
-import type { ProjectState } from './pipeline.ts'
-import type { Capability, ChapterStatus, EngineInfo } from './types.ts'
-import { readJson } from './util.ts'
+import type { ConnectionFence, RegisterableRoute, HttpRouteRegistrar } from './http-types.ts'
+import { projectSnapshot, type ProjectSnapshot } from './snapshot.ts'
+
+export type { ConnectionFence, RegisterableRoute, HttpRouteRegistrar } from './http-types.ts'
+export type { ProjectSnapshot as PanelSnapshot, SnapshotChapter as PanelChapter } from './snapshot.ts'
 
 /** Path prefix owned by this plugin. */
 export const PANEL_ROUTE_PREFIX = '/voiceover/panel'
-
-/** Project ids are the first 12 hex characters of a content hash. */
-const PROJECT_ID = /^[0-9a-f]{8,24}$/
-
-/** Structural view of a DSH web route registration. */
-export interface RegisterableRoute {
-  kind: 'exact' | 'prefix'
-  path: string
-  handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
-}
-
-/** Structural view of the host `webServer` service; only `register` is used. */
-export interface HttpRouteRegistrar {
-  register(route: RegisterableRoute): () => void
-}
-
-/** Structural view of the host connection fence. */
-export interface ConnectionFence {
-  requestRejection?(input: { headers: Record<string, string | string[] | undefined> }): 401 | 403 | undefined
-}
-
-/** One chapter row as the panel needs it. */
-export interface PanelChapter {
-  id: string
-  order: number
-  title: string
-  status: ChapterStatus
-  durationMs?: number
-  subtitles?: string
-  error?: string
-  /** Signed, session-bound playback URL; absent when no audio route is mounted. */
-  audioUrl?: string
-}
-
-/** What the panel renders. Deliberately small: no script text, no file paths. */
-export interface PanelSnapshot {
-  projectId: string
-  title: string
-  done: number
-  total: number
-  /** Chapters that still need work; the panel keeps polling while this is > 0. */
-  pending: number
-  failed: number
-  capability: Capability
-  engine: EngineInfo
-  chapters: PanelChapter[]
-  warnings: string[]
-  /** Total warnings recorded; `warnings` is capped for the panel. */
-  warningCount: number
-  /** mtime of `state.json`: the last time the pipeline actually wrote progress. */
-  stateUpdatedAt: string
-  /** When this snapshot was served; not a progress fact. */
-  servedAt: string
-}
 
 /** Injection points; tests pass a fake host. */
 export interface PanelRouteOptions {
@@ -98,57 +44,10 @@ export class PanelRoute {
   }
 
   /** Build a snapshot from `state/state.json`; undefined when unknown. */
-  async snapshot(projectId: string): Promise<PanelSnapshot | undefined> {
-    if (!PROJECT_ID.test(projectId)) return undefined
-    const stateFile = join(this.options.outputDir, projectId, 'state', 'state.json')
-    const state = await readJson<ProjectState>(stateFile)
-    if (state === undefined) return undefined
-
-    // The panel shows "last write" so a stalled run is visible. A request time
-    // here would always look fresh and hide exactly that condition.
-    let stateUpdatedAt = new Date(0).toISOString()
-    try {
-      stateUpdatedAt = (await stat(stateFile)).mtime.toISOString()
-    } catch {
-      // Keep the epoch fallback: "unknown" must not claim freshness.
-    }
-
-    const chapters = [...state.chapters].sort((a, b) => a.order - b.order)
-    const done = chapters.filter((chapter) => chapter.status === 'done').length
-    const failed = chapters.filter((chapter) => chapter.status === 'failed').length
-
-    return {
-      projectId,
-      title: state.outline.title,
-      done,
-      total: state.outline.chapters.length,
-      pending: Math.max(0, state.outline.chapters.length - done - failed),
-      failed,
-      capability: state.capability,
-      engine: state.engine,
-      chapters: chapters.map((chapter) => {
-        const row: PanelChapter = {
-          id: chapter.id,
-          order: chapter.order,
-          title: chapter.title,
-          status: chapter.status,
-          ...(chapter.audio === undefined ? {} : { durationMs: chapter.audio.durationMs }),
-          ...(chapter.subtitles === undefined ? {} : { subtitles: chapter.subtitles.path }),
-          ...(chapter.error === undefined ? {} : { error: chapter.error.code }),
-        }
-        // Playback URLs are minted per request: they expire, and they only
-        // exist while the audio route is mounted.
-        if (chapter.audio !== undefined && this.options.audioUrlFor !== undefined) {
-          const url = this.options.audioUrlFor(join(this.options.outputDir, projectId, chapter.audio.path))
-          if (url !== undefined) row.audioUrl = url
-        }
-        return row
-      }),
-      warnings: state.warnings.slice(0, 5),
-      warningCount: state.warnings.length,
-      stateUpdatedAt,
-      servedAt: new Date().toISOString(),
-    }
+  async snapshot(projectId: string): Promise<ProjectSnapshot | undefined> {
+    return projectSnapshot(this.options.outputDir, projectId, {
+      ...(this.options.audioUrlFor === undefined ? {} : { audioUrlFor: this.options.audioUrlFor }),
+    })
   }
 
   /** Register on the host router; the disposer unregisters the route. */

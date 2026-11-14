@@ -1,6 +1,6 @@
 {
   "name": "@leiboss/dsh-voiceover",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Long-form voiceover pipeline for DeepSeek Harness: chapter planning, spoken-script adaptation, subtitles, manifest, and resumable jobs. Turns a document into a publishable audio set.",
   "license": "MIT",
   "author": "leiboss",
@@ -25,6 +25,9 @@
     "long-form"
   ],
   "type": "module",
+  "bin": {
+    "dsh-voiceover": "./dist/serve-entry.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

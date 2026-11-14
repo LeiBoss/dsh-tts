@@ -101,3 +101,33 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 | `voiceover_status` | 查看逐章进度 |
 | `voiceover_export` | 返回音频、字幕、manifest 的绝对路径 |
 | `voiceover_rerun` | 续跑：跳过已完成章节，重跑失败章节 |
+## 本地 daemon
+
+```powershell
+$env:DSH_VOICEOVER_TOKEN = "<random>"
+node dist/serve-entry.js serve --port 7801 [--host 127.0.0.1] [--output <dir>]
+```
+
+只绑回环地址；无 token 拒绝启动。除 `/healthz` 外每个请求都要
+`Authorization: Bearer <token>`。
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/healthz` | 存活与版本（免 token） |
+| GET | `/v1/doctor` | 引擎自检 + 端点探测 |
+| POST | `/v1/tts` | 短句合成 → `{ filePath, durationMs, timingQuality, engine }` |
+| POST | `/v1/voiceover` | 建项目 → `202 { projectId, statusUrl }`（`sourcePath` 或 `sourceText` 二选一） |
+| GET | `/v1/projects/:id` | 与面板同源的进度快照 |
+| GET | `/v1/projects/:id/manifest` | 完整 manifest |
+| POST | `/v1/projects/:id/rerun` | 续跑 → `202` |
+| GET | `/v1/projects/:id/audio/:chapter.mp3` | 音频，支持 `Range`（206） |
+| GET | `/v1/projects/:id/subtitles/:chapter(.est).srt` | 字幕 |
+
+```powershell
+curl -H "Authorization: Bearer $env:DSH_VOICEOVER_TOKEN" `
+     -H "content-type: application/json" `
+     -d '{"sourcePath":"D:\\docs\\a.md","style":"news"}' `
+     http://127.0.0.1:7801/v1/voiceover
+```
+
+建项目和续跑都是异步的：立即返回 202，进度靠 `/v1/projects/:id` 轮询。

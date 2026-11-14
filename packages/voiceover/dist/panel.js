@@ -1,10 +1,6 @@
-import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
-import { readJson } from "./util.js";
+import { projectSnapshot } from "./snapshot.js";
 /** Path prefix owned by this plugin. */
 export const PANEL_ROUTE_PREFIX = '/voiceover/panel';
-/** Project ids are the first 12 hex characters of a content hash. */
-const PROJECT_ID = /^[0-9a-f]{8,24}$/;
 /** Serve one project's persisted progress as JSON. */
 export class PanelRoute {
     options;
@@ -13,57 +9,9 @@ export class PanelRoute {
     }
     /** Build a snapshot from `state/state.json`; undefined when unknown. */
     async snapshot(projectId) {
-        if (!PROJECT_ID.test(projectId))
-            return undefined;
-        const stateFile = join(this.options.outputDir, projectId, 'state', 'state.json');
-        const state = await readJson(stateFile);
-        if (state === undefined)
-            return undefined;
-        // The panel shows "last write" so a stalled run is visible. A request time
-        // here would always look fresh and hide exactly that condition.
-        let stateUpdatedAt = new Date(0).toISOString();
-        try {
-            stateUpdatedAt = (await stat(stateFile)).mtime.toISOString();
-        }
-        catch {
-            // Keep the epoch fallback: "unknown" must not claim freshness.
-        }
-        const chapters = [...state.chapters].sort((a, b) => a.order - b.order);
-        const done = chapters.filter((chapter) => chapter.status === 'done').length;
-        const failed = chapters.filter((chapter) => chapter.status === 'failed').length;
-        return {
-            projectId,
-            title: state.outline.title,
-            done,
-            total: state.outline.chapters.length,
-            pending: Math.max(0, state.outline.chapters.length - done - failed),
-            failed,
-            capability: state.capability,
-            engine: state.engine,
-            chapters: chapters.map((chapter) => {
-                const row = {
-                    id: chapter.id,
-                    order: chapter.order,
-                    title: chapter.title,
-                    status: chapter.status,
-                    ...(chapter.audio === undefined ? {} : { durationMs: chapter.audio.durationMs }),
-                    ...(chapter.subtitles === undefined ? {} : { subtitles: chapter.subtitles.path }),
-                    ...(chapter.error === undefined ? {} : { error: chapter.error.code }),
-                };
-                // Playback URLs are minted per request: they expire, and they only
-                // exist while the audio route is mounted.
-                if (chapter.audio !== undefined && this.options.audioUrlFor !== undefined) {
-                    const url = this.options.audioUrlFor(join(this.options.outputDir, projectId, chapter.audio.path));
-                    if (url !== undefined)
-                        row.audioUrl = url;
-                }
-                return row;
-            }),
-            warnings: state.warnings.slice(0, 5),
-            warningCount: state.warnings.length,
-            stateUpdatedAt,
-            servedAt: new Date().toISOString(),
-        };
+        return projectSnapshot(this.options.outputDir, projectId, {
+            ...(this.options.audioUrlFor === undefined ? {} : { audioUrlFor: this.options.audioUrlFor }),
+        });
     }
     /** Register on the host router; the disposer unregisters the route. */
     register(server) {

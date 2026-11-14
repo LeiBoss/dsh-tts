@@ -52,6 +52,14 @@ export interface ProjectResult {
     /** Chapters that were skipped because their inputs were unchanged. */
     skipped: string[];
 }
+/**
+ * Canonical text used for identity and planning.
+ *
+ * Every caller (plugin tool, daemon, rerun) must key projects by this string,
+ * not by the raw input: the persisted source file differs from the original by
+ * a trailing newline, and identity must survive that round trip.
+ */
+export declare function normalizeSource(text: string): string;
 /** Compute the resume key for one chapter. */
 export declare function chapterInputHash(text: string, style: StyleProfile): string;
 /** Compute the project identity from everything that changes its output. */

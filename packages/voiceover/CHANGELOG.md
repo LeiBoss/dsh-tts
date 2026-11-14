@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- `dsh-voiceover serve`: a local daemon exposing the same operations over HTTP
+  (bearer token on every route, Range-capable audio, 202 async jobs).
+- The daemon keys projects with the shared `normalizeSource`, so a project
+  created through the API and one created through the Tool land on the same id.
+- Snapshot building moved to `snapshot.ts`, shared by the panel and the API.
+- MCP transport is not implemented yet; the HTTP API is the current surface.
 ## 0.2.0
 
 - `voiceover_rerun` tool plus a panel button: one operation (`operations.ts`) called

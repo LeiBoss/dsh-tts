@@ -85,6 +85,16 @@ export interface ProjectResult {
 /** Target characters per planned chapter when no model is available. */
 const FALLBACK_CHAPTER_CHARS = 1400
 
+/**
+ * Canonical text used for identity and planning.
+ *
+ * Every caller (plugin tool, daemon, rerun) must key projects by this string,
+ * not by the raw input: the persisted source file differs from the original by
+ * a trailing newline, and identity must survive that round trip.
+ */
+export function normalizeSource(text: string): string {
+  return splitParagraphs(text).join('\n\n')
+}
 /** Compute the resume key for one chapter. */
 export function chapterInputHash(text: string, style: StyleProfile): string {
   return sha256(`${text}\u0000style=${style}\u0000prompt=${PROMPT_VERSION}`)

@@ -50,7 +50,7 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover  # 产品或引擎一�
 | 宿主联调脚本 | [`scripts/host-probe/run.ps1`](scripts/host-probe/run.ps1) |
 | 零依赖引擎（`edge-js`） | 已实现 + 单测 + 宿主验证：真实合成、精确时长、词边界随缓存保留 |
 | 对话内进度面板（client） | 已实现：进度条、逐章状态、降级提示、试听、续跑失败章节 |
-| `voiceover serve` / MCP | 未实现 |
+| 本地 daemon（`serve`） | 已实现：HTTP API（bearer token、Range、202 异步任务）；MCP 未实现 |
 | zip / m4b 导出 | 未实现 |
 
 ## 许可
@@ -65,3 +65,13 @@ pwsh -File scripts/host-probe/run.ps1
 ```
 
 验证内容与失败修复记录见 [`docs/HOST-VERIFICATION.md`](docs/HOST-VERIFICATION.md)：服务挂载、bundle patch 按 id 合并、单次挂载、真实合成（`edge-js`、精确时长）、词边界随缓存命中保留。
+## 本地 daemon
+
+```powershell
+$env:DSH_VOICEOVER_TOKEN = "换成一个随机串"
+node packages/voiceover/dist/serve-entry.js serve --port 7801
+```
+
+默认只绑 `127.0.0.1`，没有 token 直接拒绝启动。所有请求带 `Authorization: Bearer <token>`
+（`/healthz` 除外），音频支持 Range 便于拖动。端点和示例见
+[`packages/voiceover/README.md`](packages/voiceover/README.md#本地-daemon)。
