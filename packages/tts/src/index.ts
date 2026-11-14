@@ -50,6 +50,18 @@ import { mountTtsService } from './register-service.ts'
 
 export { Config } from './config.ts'
 export type { TtsConfig } from './config.ts'
+export { resolveConfig, DEFAULT_ENGINE, type TtsEngineKind } from './config.ts'
+export { TtsService } from './service.ts'
+export type {
+  TtsAudioResult,
+  TtsCapabilities,
+  TtsDoctorReport,
+  TtsProbeReport,
+  TtsRequest,
+  TtsResult,
+  TtsServiceDeps,
+  TtsSpeechResult,
+} from './service.ts'
 export type {
   TTSProvider,
   SynthesizeOptions,

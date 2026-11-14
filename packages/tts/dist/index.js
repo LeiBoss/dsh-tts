@@ -13,6 +13,8 @@ import { probeEndpoint } from "./probe.js";
 import { AVAILABLE_VOICES } from "./voices.js";
 import { mountTtsService } from "./register-service.js";
 export { Config } from "./config.js";
+export { resolveConfig, DEFAULT_ENGINE } from "./config.js";
+export { TtsService } from "./service.js";
 export { ErrorCode, TtsError } from "./errors.js";
 export { cacheKey, findCachedFile } from "./cache.js";
 export { runProcess, synthesize } from "./edge-tts.js";
