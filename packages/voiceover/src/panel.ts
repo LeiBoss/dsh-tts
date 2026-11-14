@@ -50,6 +50,8 @@ export interface PanelChapter {
   durationMs?: number
   subtitles?: string
   error?: string
+  /** Signed, session-bound playback URL; absent when no audio route is mounted. */
+  audioUrl?: string
 }
 
 /** What the panel renders. Deliberately small: no script text, no file paths. */
@@ -77,6 +79,8 @@ export interface PanelSnapshot {
 export interface PanelRouteOptions {
   outputDir: string
   connection?: ConnectionFence
+  /** Resolves one chapter's audio file to a signed URL, when a route is mounted. */
+  audioUrlFor?: (filePath: string) => string | undefined
   debug?: (message: string) => void
 }
 
@@ -117,15 +121,24 @@ export class PanelRoute {
       failed,
       capability: state.capability,
       engine: state.engine,
-      chapters: chapters.map((chapter) => ({
-        id: chapter.id,
-        order: chapter.order,
-        title: chapter.title,
-        status: chapter.status,
-        ...(chapter.audio === undefined ? {} : { durationMs: chapter.audio.durationMs }),
-        ...(chapter.subtitles === undefined ? {} : { subtitles: chapter.subtitles.path }),
-        ...(chapter.error === undefined ? {} : { error: chapter.error.code }),
-      })),
+      chapters: chapters.map((chapter) => {
+        const row: PanelChapter = {
+          id: chapter.id,
+          order: chapter.order,
+          title: chapter.title,
+          status: chapter.status,
+          ...(chapter.audio === undefined ? {} : { durationMs: chapter.audio.durationMs }),
+          ...(chapter.subtitles === undefined ? {} : { subtitles: chapter.subtitles.path }),
+          ...(chapter.error === undefined ? {} : { error: chapter.error.code }),
+        }
+        // Playback URLs are minted per request: they expire, and they only
+        // exist while the audio route is mounted.
+        if (chapter.audio !== undefined && this.options.audioUrlFor !== undefined) {
+          const url = this.options.audioUrlFor(join(this.options.outputDir, projectId, chapter.audio.path))
+          if (url !== undefined) row.audioUrl = url
+        }
+        return row
+      }),
       warnings: state.warnings.slice(0, 5),
       warningCount: state.warnings.length,
       stateUpdatedAt,

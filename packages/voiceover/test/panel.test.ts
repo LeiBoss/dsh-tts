@@ -167,3 +167,27 @@ test('snapshot refuses ids that are not hex project keys', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('mints a playback URL only when an audio route is mounted', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+
+    const withAudio = new PanelRoute({
+      outputDir: root,
+      audioUrlFor: (filePath) => `/voiceover/audio/${filePath.split(/[\\/]/).pop()}`,
+    })
+    const snapshot = await withAudio.snapshot(PROJECT_ID)
+    assert.ok(snapshot)
+    assert.equal(snapshot.chapters[0]?.audioUrl, '/voiceover/audio/ch-01.mp3')
+    // A chapter without audio has no URL, not an empty string.
+    assert.equal(snapshot.chapters[1]?.audioUrl, undefined)
+
+    const withoutAudio = new PanelRoute({ outputDir: root })
+    const plain = await withoutAudio.snapshot(PROJECT_ID)
+    assert.equal(plain?.chapters[0]?.audioUrl, undefined)
+    assert.equal(Object.prototype.hasOwnProperty.call(plain?.chapters[0] ?? {}, 'audioUrl'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

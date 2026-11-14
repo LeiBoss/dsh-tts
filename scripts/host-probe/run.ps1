@@ -91,7 +91,7 @@ if (-not (Test-Path $profileDir)) { throw 'profile was not created' }
 
 Step 'install engine + product + probe'
 if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', (Join-Path $packDir 'leiboss-dsh-tts-0.3.0.tgz'))) -ne 0) { throw 'install of @leiboss/dsh-tts failed' }
-if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', (Join-Path $packDir 'leiboss-dsh-voiceover-0.1.0.tgz'))) -ne 0) { throw 'install of @leiboss/dsh-voiceover failed' }
+if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', (Join-Path $packDir 'leiboss-dsh-voiceover-0.1.1.tgz'))) -ne 0) { throw 'install of @leiboss/dsh-voiceover failed' }
 if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', $probeDir)) -ne 0) { throw 'install of the probe plugin failed' }
 
 Step 'boot twice (cache miss, then cache hit)'

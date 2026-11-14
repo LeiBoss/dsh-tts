@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Playback: host registers `/voiceover/audio` (the engine's `AudioRoute` with its own
+  prefix, Range + session fence); the panel shows one player plus a per-chapter play
+  button, and the URL is captured on click so progress refreshes do not interrupt.
 ## 0.1.0
 
 - Conversation panel: a client view for `voiceover_create` / `voiceover_status` that

@@ -8,6 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
+import { AudioRoute } from '@leiboss/dsh-tts'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -35,6 +36,7 @@ export const Config = z.object({
   llmBaseUrl: z.string().description('OpenAI-compatible base URL, for example https://api.deepseek.com/v1.'),
   llmApiKey: z.string().description('API key for the model endpoint.'),
   llmModel: z.string().default('deepseek-chat').description('Model name recorded in the manifest.'),
+  trustedHosts: z.array(z.string()).description('Extra Host names accepted by the audio route (reverse proxies).'),
 })
 
 /** Config accepted by {@link apply}. */
@@ -47,6 +49,8 @@ export interface VoiceoverConfig {
   llmBaseUrl?: string
   llmApiKey?: string
   llmModel?: string
+  /** Extra Host names accepted by the audio route (reverse proxies). */
+  trustedHosts?: string[]
 }
 
 /** Resolve the project root without requiring DSH_HOME. */
@@ -340,24 +344,53 @@ export function createVoiceoverTools(
   return [create, status, exportTool]
 }
 
-/** Mount the read-only panel endpoint behind the host connection fence. */
-function mountPanel(ctx: Context, config: VoiceoverConfig, env: NodeJS.ProcessEnv = process.env): void {
-  const route = new PanelRoute({
-    outputDir: resolveOutputDir(config, env),
-    connection: serviceOf<ConnectionFence>(ctx, 'connection'),
-    debug: (message) => {
-      const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined
-      logger?.debug?.(message)
-    },
+/** Route prefix for per-chapter audio; distinct from the engine's own prefix. */
+export const VOICEOVER_AUDIO_PREFIX = '/voiceover/audio'
+
+/**
+ * Mount the progress panel and the audio route behind the host fence.
+ *
+ * The audio route is the engine's `AudioRoute` with a different prefix: it
+ * already mints signed, expiring URLs, serves Range requests for seeking, and
+ * checks Host/Origin plus the browser session. Reusing it keeps one
+ * implementation of that security surface instead of two.
+ */
+function mountWebSurfaces(ctx: Context, config: VoiceoverConfig, env: NodeJS.ProcessEnv = process.env): void {
+  const outputDir = resolveOutputDir(config, env)
+  const connection = serviceOf<ConnectionFence>(ctx, 'connection')
+  const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined
+  const debug = (message: string): void => {
+    logger?.debug?.(message)
+  }
+
+  const audio = new AudioRoute({
+    outputDir,
+    prefix: VOICEOVER_AUDIO_PREFIX,
+    trustedHosts: config.trustedHosts ?? [],
+    ...(connection === undefined ? {} : { connection }),
+    debug,
+  })
+  const panel = new PanelRoute({
+    outputDir,
+    ...(connection === undefined ? {} : { connection }),
+    audioUrlFor: (filePath) => audio.urlFor(filePath),
+    debug,
   })
 
   const register = (registrar: HttpRouteRegistrar): void => {
-    ctx.effect(() => route.register(registrar))
+    try {
+      const origin = (registrar as unknown as { getOrigin?: () => string | undefined }).getOrigin?.()
+      if (origin !== undefined) audio.setOrigin(origin)
+    } catch {
+      // No advertised origin: the panel uses same-origin relative URLs anyway.
+    }
+    ctx.effect(() => audio.register(registrar))
+    ctx.effect(() => panel.register(registrar))
   }
 
   // The Web host provides `webServer`; older hosts exposed the same router as
-  // `httpServer`. Without either (headless, file://), the panel simply does not
-  // render and the tools still work.
+  // `httpServer`. Without either (headless, file://), the panel and playback do
+  // not render and the tools still work.
   const web = serviceOf<HttpRouteRegistrar>(ctx, 'webServer') ?? serviceOf<HttpRouteRegistrar>(ctx, 'httpServer')
   if (web !== undefined) {
     register(web)
@@ -375,5 +408,5 @@ export function apply(ctx: Context, config: VoiceoverConfig = {}): void {
   for (const tool of createVoiceoverTools(ctx, config)) {
     ctx.tools.register(tool)
   }
-  mountPanel(ctx, config)
+  mountWebSurfaces(ctx, config)
 }

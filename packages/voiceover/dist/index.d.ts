@@ -22,6 +22,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     llmBaseUrl: z<string, string, "plain">;
     llmApiKey: z<string, string, "plain">;
     llmModel: z<string, string, "defined">;
+    trustedHosts: z<string[], string[], "plain">;
 }>>, Schemastery.ObjectT<NoInfer<{
     outputDir: z<string, string, "plain">;
     defaultVoice: z<string, string, "defined">;
@@ -31,6 +32,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     llmBaseUrl: z<string, string, "plain">;
     llmApiKey: z<string, string, "plain">;
     llmModel: z<string, string, "defined">;
+    trustedHosts: z<string[], string[], "plain">;
 }>>, "plain">;
 /** Config accepted by {@link apply}. */
 export interface VoiceoverConfig {
@@ -42,9 +44,13 @@ export interface VoiceoverConfig {
     llmBaseUrl?: string;
     llmApiKey?: string;
     llmModel?: string;
+    /** Extra Host names accepted by the audio route (reverse proxies). */
+    trustedHosts?: string[];
 }
 /** Tool definitions; separated so tests can inspect them without a host. */
 export declare function createVoiceoverTools(ctx: Context, config: VoiceoverConfig, env?: NodeJS.ProcessEnv): ToolDefinition[];
+/** Route prefix for per-chapter audio; distinct from the engine's own prefix. */
+export declare const VOICEOVER_AUDIO_PREFIX = "/voiceover/audio";
 /** Mount the tools. Registration is fiber-owned, so unloading cleans up. */
 export declare function apply(ctx: Context, config?: VoiceoverConfig): void;
 //# sourceMappingURL=index.d.ts.map

@@ -104,7 +104,19 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
       list: { display: 'grid', gap: 2, maxHeight: 260, overflowY: 'auto' },
-      row: { display: 'grid', gridTemplateColumns: '8px 1fr auto', alignItems: 'center', gap: 8, minHeight: 22 },
+      row: { display: 'grid', gridTemplateColumns: '8px 1fr auto 18px', alignItems: 'center', gap: 8, minHeight: 22 },
+      playBtn: {
+        width: 18,
+        height: 18,
+        padding: 0,
+        border: 'none',
+        background: 'transparent',
+        color: 'var(--dsw-alias-brand-primary)',
+        cursor: 'pointer',
+        fontSize: FONT_META,
+        lineHeight: '18px',
+      },
+      player: { width: '100%', height: 32 },
       dot: { width: 8, height: 8, borderRadius: 999 },
       rowTitle: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       meta: {
@@ -225,6 +237,7 @@ window.__ModuleLoader__.load({
     /** One chapter row. */
     function ChapterRow(props) {
       const chapter = props.chapter
+      const playable = typeof chapter.audioUrl === 'string' && chapter.audioUrl.length > 0
       const tone = TONE[chapter.status] ?? 'var(--dsw-alias-brand-primary)'
       const duration = formatDuration(chapter.durationMs)
       const meta =
@@ -239,6 +252,17 @@ window.__ModuleLoader__.load({
         h('span', { style: { ...S.dot, background: tone } }),
         h('span', { style: S.rowTitle }, `${chapter.id} ${chapter.title}`),
         h('span', { style: chapter.error === undefined ? S.meta : { ...S.meta, color: 'var(--dsw-alias-state-error-primary)' } }, meta),
+        playable
+          ? h('button',
+              {
+                type: 'button',
+                style: S.playBtn,
+                'aria-label': `${props.playing ? '停止' : '播放'} ${chapter.id} ${chapter.title}`,
+                onClick: () => props.onPlay(chapter),
+              },
+              props.playing ? '■' : '▶',
+            )
+          : h('span'),
       )
     }
 
@@ -277,6 +301,10 @@ window.__ModuleLoader__.load({
 
       const [snap, setSnap] = react.useState(() => (id === undefined ? null : (snapshots.get(id) ?? null)))
       const [problem, setProblem] = react.useState(null)
+      // One player, not one per chapter: a 20-chapter project must not mount 20
+      // audio elements, and the URL is stored at click time so a snapshot
+      // refresh cannot restart playback.
+      const [playing, setPlaying] = react.useState(null)
 
       react.useEffect(() => {
         if (id === undefined) return undefined
@@ -417,8 +445,31 @@ window.__ModuleLoader__.load({
           : h(
               'div',
               { style: S.list },
-              chapters.map((chapter) => h(ChapterRow, { key: chapter.id, chapter })),
+              chapters.map((chapter) =>
+                h(ChapterRow, {
+                  key: chapter.id,
+                  chapter,
+                  playing: playing !== null && playing.id === chapter.id,
+                  onPlay: (target) =>
+                    setPlaying((current) =>
+                      current !== null && current.id === target.id
+                        ? null
+                        : { id: target.id, url: target.audioUrl },
+                    ),
+                }),
+              ),
             ),
+        playing === null
+          ? null
+          : h('audio', {
+              key: playing.url,
+              src: playing.url,
+              controls: true,
+              autoPlay: true,
+              preload: 'none',
+              style: S.player,
+              onEnded: () => setPlaying(null),
+            }),
         warnings.length === 0
           ? null
           : h(

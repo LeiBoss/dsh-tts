@@ -40,6 +40,8 @@ export interface PanelChapter {
     durationMs?: number;
     subtitles?: string;
     error?: string;
+    /** Signed, session-bound playback URL; absent when no audio route is mounted. */
+    audioUrl?: string;
 }
 /** What the panel renders. Deliberately small: no script text, no file paths. */
 export interface PanelSnapshot {
@@ -65,6 +67,8 @@ export interface PanelSnapshot {
 export interface PanelRouteOptions {
     outputDir: string;
     connection?: ConnectionFence;
+    /** Resolves one chapter's audio file to a signed URL, when a route is mounted. */
+    audioUrlFor?: (filePath: string) => string | undefined;
     debug?: (message: string) => void;
 }
 /** Serve one project's persisted progress as JSON. */
