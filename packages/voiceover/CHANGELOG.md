@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1
+
+- **The conversation panel never appeared.** `dsh.client.inject` named three
+  modules that the page cannot resolve (`dsh-client-runtime`,
+  `dsh-client-ui-tool`, `dsh-client-ui-slots`), so the loader skipped the whole
+  client half and every `voiceover_create` result fell back to the generic tool
+  row. It now injects `@deepseek-ai/dsh-client-ui-conversation`, the package that
+  owns `tool.call.toolview`.
+- A manifest contract test now asserts the inject list, the exported client
+  entry and its presence under a published `files` directory, plus the bundle
+  patch and the version constant. Module-level tests stub the loader, which is
+  why this class of bug passed them.
 ## 0.3.0
 
 - The progress track had no background of its own (`bg-layer-2` is white in the
