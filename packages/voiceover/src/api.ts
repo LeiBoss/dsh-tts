@@ -171,6 +171,35 @@ async function serveFile(
   }
 }
 
+
+/**
+ * Map a synthesis failure onto an HTTP answer.
+ *
+ * Throttling is not a client error: the request was fine, the upstream is busy.
+ * Answering 429 with `Retry-After` lets a caller back off instead of treating it
+ * as a bad request and giving up.
+ */
+function synthesisFailure(error: unknown): ApiResponse {
+  const message = error instanceof Error ? error.message.slice(0, 300) : 'synthesis failed'
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : ''
+  if (code === 'UPSTREAM_THROTTLED' || /\\b429\\b|too many requests|rate limit/i.test(message)) {
+    const payload = Buffer.from(`${JSON.stringify({ error: message, code: 'UPSTREAM_THROTTLED' })}\n`)
+    return {
+      status: 429,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'retry-after': '30',
+        'cache-control': 'no-store',
+        'content-length': String(payload.length),
+      },
+      body: payload,
+    }
+  }
+  return json(422, { error: message })
+}
 /** Resolve a chapter artifact inside one project, refusing escapes. */
 function artifactPath(outputDir: string, projectId: string, name: string): string | undefined {
   if (!PROJECT_ID.test(projectId)) return undefined
@@ -216,7 +245,7 @@ export async function handleRequest(context: ApiContext, request: ApiRequest): P
       const result = await context.synthesize({ text, ...(voice === undefined ? {} : { voice }), ...(rate === undefined ? {} : { rate }) })
       return json(200, result)
     } catch (error) {
-      return json(422, { error: error instanceof Error ? error.message.slice(0, 300) : 'synthesis failed' })
+      return synthesisFailure(error)
     }
   }
 

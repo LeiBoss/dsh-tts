@@ -131,3 +131,5 @@ curl -H "Authorization: Bearer $env:DSH_VOICEOVER_TOKEN" `
 ```
 
 建项目和续跑都是异步的：立即返回 202，进度靠 `/v1/projects/:id` 轮询。
+上游限流时 `/v1/tts` 返回 `429` + `Retry-After: 30`（引擎自身会先按 2s/6s/18s
+退避重试同一引擎，预算耗尽才降级），调用方照 `Retry-After` 重试即可。

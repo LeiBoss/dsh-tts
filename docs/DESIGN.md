@@ -338,7 +338,7 @@ probe() →
 |---|---|
 | 环境变量 `HTTPS_PROXY` 对 Edge 的 WSS 无效 | `proxy` 配置透传；`edge-js` 用 `https-proxy-agent`，`edge-py` 用 `--proxy` |
 | 只允许 PAC / 特定出口 | `proxy` 支持 `http://user:pass@host:port`；`trustedHosts` 处理反代改端口 |
-| 端点被墙 / 限流 | 并发默认 2、指数退避、`Retry-After` 尊重；连续 3 次 `EDGE_TTS_FAILED` 自动切 `sapi` 并写 warning |
+| 端点被墙 / 限流 | 并发默认 2；429 归为 `UPSTREAM_THROTTLED`，**先**按 2s/6s/18s 退避重试同一引擎（保住音色），预算耗尽才进降级链；daemon 对外返回 `429` + `Retry-After` |
 | 完全离线 | `enginePolicy: 'offline-first'` 直接跳过探测，用 `sapi`，省 30s 超时 |
 | 无 ffmpeg | MP3 是原生产物；m4b 导出跳过并 warning（不要为了 m4b 强制装 ffmpeg） |
 

@@ -2,6 +2,9 @@
 
 ## 0.3.0
 
+- The daemon answers `429` with `Retry-After` when the engine is throttled, so a
+  caller backs off instead of treating a busy upstream as a bad request.
+
 - `dsh-voiceover serve`: a local daemon exposing the same operations over HTTP
   (bearer token on every route, Range-capable audio, 202 async jobs).
 - The daemon keys projects with the shared `normalizeSource`, so a project

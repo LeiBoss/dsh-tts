@@ -267,3 +267,22 @@ test('subtitles are served as text and unknown endpoints stay 404', async () => 
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('maps upstream throttling to 429 with Retry-After', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-api-'))
+  try {
+    const throttled = makeContext(root, {
+      async synthesize() {
+        const error = new Error('The Edge endpoint is throttling requests: 429')
+        Object.assign(error, { code: 'UPSTREAM_THROTTLED' })
+        throw error
+      },
+    })
+    const response = await handleRequest(throttled, request('POST', '/v1/tts', { body: { text: 'hi' } }))
+    assert.equal(response.status, 429)
+    assert.equal(response.headers['retry-after'], '30')
+    assert.equal(jsonOf(response).code, 'UPSTREAM_THROTTLED')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
