@@ -173,8 +173,15 @@ async function readBody(request: IncomingMessage): Promise<Buffer | undefined> {
 }
 
 /** Start the daemon. Returns the listening server for tests. */
-export async function start(options: Options): Promise<{ server: ReturnType<typeof createServer>; context: ApiContext }> {
-  const engine = new TtsService(resolveConfig({ outputDir: join(options.outputDir, '.tts'), engine: 'auto' }, process.env))
+export async function start(
+  options: Options,
+  inject: { engine?: TtsService } = {},
+): Promise<{ server: ReturnType<typeof createServer>; context: ApiContext }> {
+  // The engine is injectable so a test can exercise the daemon without a
+  // network or a real voice backend.
+  const engine =
+    inject.engine ??
+    new TtsService(resolveConfig({ outputDir: join(options.outputDir, '.tts'), engine: 'auto' }, process.env))
   const model =
     options.llmBaseUrl === undefined
       ? undefined

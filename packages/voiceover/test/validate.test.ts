@@ -99,3 +99,90 @@ test('gives up with a routable code after the repair budget is spent', async () 
     (error: unknown) => error instanceof LlmError && error.code === 'LLM_SCHEMA_INVALID',
   )
 })
+
+/** Deep-copy a fixture so each case mutates its own object. */
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+test('outline validation reports every broken field at its JSON path', () => {
+  const cases: [string, (outline: any) => void, string][] = [
+    ['empty title', (o) => { o.title = '' }, '/title'],
+    ['long title', (o) => { o.title = 'x'.repeat(61) }, '/title'],
+    ['bad chapter id', (o) => { o.chapters[0].id = 'chapter-1' }, '/chapters/0/id'],
+    ['long chapter title', (o) => { o.chapters[0].title = 'x'.repeat(15) }, '/chapters/0/title'],
+    ['long summary', (o) => { o.chapters[0].summary = 'x'.repeat(81) }, '/chapters/0/summary'],
+    ['range not an array', (o) => { o.chapters[0].sourceRange = 5 }, '/chapters/0/sourceRange'],
+    ['range inverted', (o) => { o.chapters[0].sourceRange = [5, 1] }, '/chapters/0/sourceRange'],
+    ['range negative', (o) => { o.chapters[0].sourceRange = [-1, 3] }, '/chapters/0/sourceRange/0'],
+    ['non-integer char count', (o) => { o.chapters[0].estimatedChars = 1.5 }, '/chapters/0/estimatedChars'],
+    ['crossRefs not an array', (o) => { o.chapters[0].crossRefs = 'x' }, '/chapters/0/crossRefs'],
+    ['crossRef too long', (o) => { o.chapters[0].crossRefs = ['x'.repeat(41)] }, '/chapters/0/crossRefs/0'],
+    ['note too long', (o) => { o.chapters[0].note = 'x'.repeat(121) }, '/chapters/0/note'],
+    ['no chapters', (o) => { o.chapters = [] }, '/chapters'],
+    [
+      'too many chapters',
+      (o) => {
+        o.chapters = Array.from({ length: 41 }, (_, index) => ({
+          ...o.chapters[0],
+          id: `ch-${String(index + 1).padStart(2, '0')}`,
+        }))
+      },
+      '/chapters',
+    ],
+  ]
+
+  for (const [name, mutate, path] of cases) {
+    const outline = clone(VALID_OUTLINE) as any
+    mutate(outline)
+    try {
+      validateOutline(outline)
+      assert.fail(`${name}: expected a ValidationError`)
+    } catch (error) {
+      assert.ok(error instanceof ValidationError, `${name}: wrong error type`)
+      assert.equal(error.path, path, `${name}: wrong path`)
+    }
+  }
+})
+
+test('manifest validation reports every broken field at its JSON path', () => {
+  const cases: [string, (manifest: any) => void, string][] = [
+    ['bad schema version', (m) => { m.schemaVersion = 2 }, '/schemaVersion'],
+    ['non-hex project id', (m) => { m.projectId = 'ZZZZZZZZ' }, '/projectId'],
+    ['short project id', (m) => { m.projectId = 'abc' }, '/projectId'],
+    ['missing createdAt', (m) => { delete m.createdAt }, '/createdAt'],
+    ['bad prompt version', (m) => { m.promptVersion = '1.3' }, '/promptVersion'],
+    ['capability missing a flag', (m) => { delete m.capability.llm }, '/capability/llm'],
+    ['bad timing quality', (m) => { m.capability.timingQuality = 'good' }, '/capability/timingQuality'],
+    ['bad engine name', (m) => { m.engine.name = 'google' }, '/engine/name'],
+    ['bad rate', (m) => { m.engine.rate = 'fast' }, '/engine/rate'],
+    ['bad source hash', (m) => { m.source.hash = 'sha256:abc' }, '/source/hash'],
+    ['zero source chars', (m) => { m.source.chars = 0 }, '/source/chars'],
+    ['no chapters', (m) => { m.chapters = [] }, '/chapters'],
+    ['bad chapter status', (m) => { m.chapters[0].status = 'built' }, '/chapters/0/status'],
+    ['bad chapter order', (m) => { m.chapters[0].order = 0 }, '/chapters/0/order'],
+    ['bad audio bytes', (m) => { m.chapters[0].audio.bytes = 0 }, '/chapters/0/audio/bytes'],
+    ['bad audio quality', (m) => { m.chapters[0].audio.timingQuality = 'maybe' }, '/chapters/0/audio/timingQuality'],
+    [
+      'error flag not boolean',
+      (m) => {
+        m.chapters[0].error = { code: 'X', message: 'y', retryable: 'yes' }
+      },
+      '/chapters/0/error/retryable',
+    ],
+    ['negative totals', (m) => { m.totals.bytes = -1 }, '/totals/bytes'],
+    ['long warning', (m) => { m.warnings = ['x'.repeat(201)] }, '/warnings/0'],
+  ]
+
+  for (const [name, mutate, path] of cases) {
+    const manifest = clone(VALID_MANIFEST) as any
+    mutate(manifest)
+    try {
+      validateManifest(manifest)
+      assert.fail(`${name}: expected a ValidationError`)
+    } catch (error) {
+      assert.ok(error instanceof ValidationError, `${name}: wrong error type`)
+      assert.equal(error.path, path, `${name}: wrong path`)
+    }
+  }
+})

@@ -153,8 +153,11 @@ async function readBody(request) {
     return Buffer.concat(chunks);
 }
 /** Start the daemon. Returns the listening server for tests. */
-export async function start(options) {
-    const engine = new TtsService(resolveConfig({ outputDir: join(options.outputDir, '.tts'), engine: 'auto' }, process.env));
+export async function start(options, inject = {}) {
+    // The engine is injectable so a test can exercise the daemon without a
+    // network or a real voice backend.
+    const engine = inject.engine ??
+        new TtsService(resolveConfig({ outputDir: join(options.outputDir, '.tts'), engine: 'auto' }, process.env));
     const model = options.llmBaseUrl === undefined
         ? undefined
         : httpCompleter({

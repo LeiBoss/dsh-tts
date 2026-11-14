@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { httpCompleter, type Completer } from './llm.ts'
 import { PanelRoute, type ConnectionFence, type HttpRouteRegistrar } from './panel.ts'
 import { rerunProject } from './operations.ts'
-import { runProject, projectKey, type PipelineDeps, type ProjectState, type StyleProfile } from './pipeline.ts'
+import { normalizeSource, projectKey, runProject, type PipelineDeps, type ProjectState, type StyleProfile } from './pipeline.ts'
 import type { SynthResult, Synthesizer } from './types.ts'
 import { readJson } from './util.ts'
 
@@ -237,8 +237,10 @@ export function createVoiceoverTools(
       const voice = args.voice ?? config.defaultVoice ?? 'zh-CN-XiaoxiaoNeural'
       const style = (args.style ?? config.style ?? 'news') as StyleProfile
       const rate = config.defaultRate ?? '+0%'
-      // The id is deterministic, so it can be reported before the run finishes.
-      const projectId = projectKey({ text, voice, rate, style })
+      // The id must match what the pipeline will compute: it keys projects by
+      // the normalised text, so reporting the raw text here would hand the
+      // panel an id that never appears on disk (and poll 404 forever).
+      const projectId = projectKey({ text: normalizeSource(text), voice, rate, style })
 
       const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined
       if (!inFlight.has(projectId)) {

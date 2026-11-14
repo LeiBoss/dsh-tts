@@ -8,6 +8,7 @@
  * refuses to start without a bearer token.
  */
 import { createServer } from 'node:http';
+import { TtsService } from '@leiboss/dsh-tts';
 import { type ApiContext } from './api.ts';
 import { type StyleProfile } from './pipeline.ts';
 /** Parsed command line. */
@@ -27,7 +28,9 @@ interface Options {
 /** Resolve options from flags, the environment, and defaults. */
 declare function resolveOptions(argv: readonly string[], env: NodeJS.ProcessEnv): Options;
 /** Start the daemon. Returns the listening server for tests. */
-export declare function start(options: Options): Promise<{
+export declare function start(options: Options, inject?: {
+    engine?: TtsService;
+}): Promise<{
     server: ReturnType<typeof createServer>;
     context: ApiContext;
 }>;

@@ -21,7 +21,7 @@ import { ErrorCode, looksLikeThrottle, TtsError } from './errors.ts'
 import { isFallbackEligible, runFallback, type FallbackAttempt } from './fallback.ts'
 import { probeEndpoint, type ProbeConnector } from './probe.ts'
 import { selfCheck, type SelfCheckResult } from './self-check.ts'
-import { isSapiSupported } from './sapi-tts.ts'
+import { isSapiSupported, type SapiOptions } from './sapi-tts.ts'
 
 /** What a caller can rely on without probing the network. */
 export interface TtsCapabilities {
@@ -93,6 +93,12 @@ export interface TtsServiceDeps {
   limiter?: ConcurrencyLimiter
   /** Backoff sleep; injected so retry tests never wait. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  /** Platform override for the SAPI chain (tests run on any OS). */
+  platform?: NodeJS.Platform
+  powershellBinary?: string
+  ffmpegBinary?: string
+  /** Injected SAPI implementation, so tests never launch PowerShell. */
+  synthesizeSapiImpl?: (text: string, options: SapiOptions) => Promise<SynthesizedAudio>
   log?: (message: string) => void
 }
 
@@ -283,6 +289,9 @@ export class TtsService {
   /** Produce audio without consulting the cache. */
   private async produce(input: SynthesisInput): Promise<TtsResult> {
     const engine = await this.resolveEngine()
+    // `engine=sapi` must not silently run the Edge CLI: the local engine is a
+    // different code path with different failure modes.
+    if (engine === 'sapi') return this.produceWithSapi(input)
     const attempt = (): Promise<TtsResult> =>
       engine === 'edge-js' ? this.produceWithEdgeJs(input) : this.produceWithCli(input)
 
@@ -304,6 +313,47 @@ export class TtsService {
     return this.fallbackChain(input, lastError)
   }
 
+  /** Local engine: no network, no Edge CLI, straight to the SAPI chain. */
+  private async produceWithSapi(input: SynthesisInput): Promise<TtsResult> {
+    const order = this.config.fallbackOrder.filter((name) => name === 'sapi')
+    if (order.length === 0) {
+      throw new TtsError(
+        ErrorCode.EngineUnavailable,
+        'engine=sapi, but "sapi" is not in fallbackOrder.',
+        'Add "sapi" to fallbackOrder, or set engine to auto.',
+      )
+    }
+
+    const outcome = await runFallback(
+      {
+        text: input.text,
+        rate: input.rate,
+        outputDir: this.config.outputDir,
+        hash: input.hash,
+        timeoutMs: this.config.timeoutMs,
+        fallbackOrder: order,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      },
+      {
+        ...(this.deps.platform === undefined ? {} : { platform: this.deps.platform }),
+        ...(this.deps.spawnImpl === undefined ? {} : { spawnImpl: this.deps.spawnImpl }),
+        ...(this.deps.powershellBinary === undefined ? {} : { powershellBinary: this.deps.powershellBinary }),
+        ...(this.deps.ffmpegBinary === undefined ? {} : { ffmpegBinary: this.deps.ffmpegBinary }),
+        ...(this.deps.synthesizeSapiImpl === undefined ? {} : { synthesizeSapiImpl: this.deps.synthesizeSapiImpl }),
+      },
+    )
+
+    if (outcome.kind === 'audio') {
+      return this.finish(outcome.audio, { ...input, engine: 'sapi' }, { attempts: outcome.attempts })
+    }
+    return {
+      kind: 'speechSynthesis',
+      text: input.text,
+      voice: input.voice,
+      rate: input.rate,
+      reason: outcome.attempts.map((attempt) => `${attempt.engine}: ${attempt.reason}`).join('; '),
+    }
+  }
   /** Wait between throttle retries; injected in tests so they never sleep. */
   private async sleep(ms: number, signal?: AbortSignal): Promise<void> {
     if (this.deps.sleep !== undefined) {
@@ -414,16 +464,25 @@ export class TtsService {
     if (!this.config.fallbackEnabled || !isFallbackEligible(error)) throw error
     this.log(`primary backend failed, trying the fallback chain: ${String(error)}`)
 
-    const outcome = await runFallback({
-      text: input.text,
-      rate: input.rate,
-      outputDir: this.config.outputDir,
-      hash: input.hash,
-      timeoutMs: this.config.timeoutMs,
-      fallbackOrder: this.config.fallbackOrder as readonly TtsEngine[],
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      primaryError: error,
-    })
+    const outcome = await runFallback(
+      {
+        text: input.text,
+        rate: input.rate,
+        outputDir: this.config.outputDir,
+        hash: input.hash,
+        timeoutMs: this.config.timeoutMs,
+        fallbackOrder: this.config.fallbackOrder as readonly TtsEngine[],
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        primaryError: error,
+      },
+      {
+        ...(this.deps.platform === undefined ? {} : { platform: this.deps.platform }),
+        ...(this.deps.spawnImpl === undefined ? {} : { spawnImpl: this.deps.spawnImpl }),
+        ...(this.deps.powershellBinary === undefined ? {} : { powershellBinary: this.deps.powershellBinary }),
+        ...(this.deps.ffmpegBinary === undefined ? {} : { ffmpegBinary: this.deps.ffmpegBinary }),
+        ...(this.deps.synthesizeSapiImpl === undefined ? {} : { synthesizeSapiImpl: this.deps.synthesizeSapiImpl }),
+      },
+    )
 
     if (outcome.kind === 'audio') {
       return this.finish(outcome.audio, { ...input, engine: outcome.engine }, { attempts: outcome.attempts })

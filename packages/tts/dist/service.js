@@ -164,6 +164,10 @@ export class TtsService {
     /** Produce audio without consulting the cache. */
     async produce(input) {
         const engine = await this.resolveEngine();
+        // `engine=sapi` must not silently run the Edge CLI: the local engine is a
+        // different code path with different failure modes.
+        if (engine === 'sapi')
+            return this.produceWithSapi(input);
         const attempt = () => engine === 'edge-js' ? this.produceWithEdgeJs(input) : this.produceWithCli(input);
         // Throttling is transient: back off and retry the good engine before
         // falling back. A fallback would hide the load problem and produce worse
@@ -183,6 +187,38 @@ export class TtsService {
             }
         }
         return this.fallbackChain(input, lastError);
+    }
+    /** Local engine: no network, no Edge CLI, straight to the SAPI chain. */
+    async produceWithSapi(input) {
+        const order = this.config.fallbackOrder.filter((name) => name === 'sapi');
+        if (order.length === 0) {
+            throw new TtsError(ErrorCode.EngineUnavailable, 'engine=sapi, but "sapi" is not in fallbackOrder.', 'Add "sapi" to fallbackOrder, or set engine to auto.');
+        }
+        const outcome = await runFallback({
+            text: input.text,
+            rate: input.rate,
+            outputDir: this.config.outputDir,
+            hash: input.hash,
+            timeoutMs: this.config.timeoutMs,
+            fallbackOrder: order,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+        }, {
+            ...(this.deps.platform === undefined ? {} : { platform: this.deps.platform }),
+            ...(this.deps.spawnImpl === undefined ? {} : { spawnImpl: this.deps.spawnImpl }),
+            ...(this.deps.powershellBinary === undefined ? {} : { powershellBinary: this.deps.powershellBinary }),
+            ...(this.deps.ffmpegBinary === undefined ? {} : { ffmpegBinary: this.deps.ffmpegBinary }),
+            ...(this.deps.synthesizeSapiImpl === undefined ? {} : { synthesizeSapiImpl: this.deps.synthesizeSapiImpl }),
+        });
+        if (outcome.kind === 'audio') {
+            return this.finish(outcome.audio, { ...input, engine: 'sapi' }, { attempts: outcome.attempts });
+        }
+        return {
+            kind: 'speechSynthesis',
+            text: input.text,
+            voice: input.voice,
+            rate: input.rate,
+            reason: outcome.attempts.map((attempt) => `${attempt.engine}: ${attempt.reason}`).join('; '),
+        };
     }
     /** Wait between throttle retries; injected in tests so they never sleep. */
     async sleep(ms, signal) {
@@ -287,6 +323,12 @@ export class TtsService {
             fallbackOrder: this.config.fallbackOrder,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             primaryError: error,
+        }, {
+            ...(this.deps.platform === undefined ? {} : { platform: this.deps.platform }),
+            ...(this.deps.spawnImpl === undefined ? {} : { spawnImpl: this.deps.spawnImpl }),
+            ...(this.deps.powershellBinary === undefined ? {} : { powershellBinary: this.deps.powershellBinary }),
+            ...(this.deps.ffmpegBinary === undefined ? {} : { ffmpegBinary: this.deps.ffmpegBinary }),
+            ...(this.deps.synthesizeSapiImpl === undefined ? {} : { synthesizeSapiImpl: this.deps.synthesizeSapiImpl }),
         });
         if (outcome.kind === 'audio') {
             return this.finish(outcome.audio, { ...input, engine: outcome.engine }, { attempts: outcome.attempts });

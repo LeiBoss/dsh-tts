@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { httpCompleter } from "./llm.js";
 import { PanelRoute } from "./panel.js";
 import { rerunProject } from "./operations.js";
-import { runProject, projectKey } from "./pipeline.js";
+import { normalizeSource, projectKey, runProject } from "./pipeline.js";
 import { readJson } from "./util.js";
 export const name = 'dsh-voiceover';
 /** The tool registry must exist before `apply` runs. */
@@ -166,8 +166,10 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
             const voice = args.voice ?? config.defaultVoice ?? 'zh-CN-XiaoxiaoNeural';
             const style = (args.style ?? config.style ?? 'news');
             const rate = config.defaultRate ?? '+0%';
-            // The id is deterministic, so it can be reported before the run finishes.
-            const projectId = projectKey({ text, voice, rate, style });
+            // The id must match what the pipeline will compute: it keys projects by
+            // the normalised text, so reporting the raw text here would hand the
+            // panel an id that never appears on disk (and poll 404 forever).
+            const projectId = projectKey({ text: normalizeSource(text), voice, rate, style });
             const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined;
             if (!inFlight.has(projectId)) {
                 const run = runProject(deps, {

@@ -1,9 +1,10 @@
 import { ConcurrencyLimiter } from './concurrency.ts';
 import type { ResolvedConfig } from './config.ts';
-import { type SpawnFunction } from './edge-tts.ts';
+import { type SpawnFunction, type SynthesizedAudio } from './edge-tts.ts';
 import { type FallbackAttempt } from './fallback.ts';
 import { type ProbeConnector } from './probe.ts';
 import { type SelfCheckResult } from './self-check.ts';
+import { type SapiOptions } from './sapi-tts.ts';
 /** What a caller can rely on without probing the network. */
 export interface TtsCapabilities {
     /** Word-level timings, which only the pure-JS backend produces. */
@@ -71,6 +72,12 @@ export interface TtsServiceDeps {
     limiter?: ConcurrencyLimiter;
     /** Backoff sleep; injected so retry tests never wait. */
     sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    /** Platform override for the SAPI chain (tests run on any OS). */
+    platform?: NodeJS.Platform;
+    powershellBinary?: string;
+    ffmpegBinary?: string;
+    /** Injected SAPI implementation, so tests never launch PowerShell. */
+    synthesizeSapiImpl?: (text: string, options: SapiOptions) => Promise<SynthesizedAudio>;
     log?: (message: string) => void;
 }
 /** One service instance owns one capacity pool and one cache namespace. */
@@ -89,6 +96,8 @@ export declare class TtsService {
     private resolveEngine;
     /** Produce audio without consulting the cache. */
     private produce;
+    /** Local engine: no network, no Edge CLI, straight to the SAPI chain. */
+    private produceWithSapi;
     /** Wait between throttle retries; injected in tests so they never sleep. */
     private sleep;
     /** CLI backend: one process per chunk, no word boundaries. */

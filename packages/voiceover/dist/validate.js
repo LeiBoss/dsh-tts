@@ -104,7 +104,9 @@ export function validateManifest(value) {
     if (!/^[0-9a-f]+$/.test(projectId))
         fail('/projectId', 'must be lowercase hex');
     string('/createdAt', root.createdAt, 10, 40);
-    string('/promptVersion', root.promptVersion, 3, 12);
+    const promptVersion = string('/promptVersion', root.promptVersion, 3, 12);
+    if (!/^p[0-9]+\.[0-9]+$/.test(promptVersion))
+        fail('/promptVersion', 'must match p1.3');
     const capability = object('/capability', root.capability);
     boolean('/capability/llm', capability.llm);
     boolean('/capability/network', capability.network);
@@ -113,7 +115,9 @@ export function validateManifest(value) {
     const engine = object('/engine', root.engine);
     oneOf('/engine/name', engine.name, ['edge-js', 'edge-py', 'sapi', 'speechSynthesis']);
     string('/engine/voice', engine.voice, 1, 80);
-    string('/engine/rate', engine.rate, 2, 8);
+    const rate = string('/engine/rate', engine.rate, 2, 8);
+    if (!/^[+-][0-9]{1,3}%$/.test(rate))
+        fail('/engine/rate', 'must match +0%');
     const source = object('/source', root.source);
     string('/source/path', source.path, 1, 400);
     const hash = string('/source/hash', source.hash, 71, 71);
@@ -126,7 +130,9 @@ export function validateManifest(value) {
     for (const [index, raw] of root.chapters.entries()) {
         const path = `/chapters/${index}`;
         const chapter = object(path, raw);
-        string(`${path}/id`, chapter.id, 4, 10);
+        const chapterId = string(`${path}/id`, chapter.id, 4, 10);
+        if (!/^ch-[0-9]{2,3}$/.test(chapterId))
+            fail(`${path}/id`, 'must match ch-01');
         integer(`${path}/order`, chapter.order, 1);
         string(`${path}/title`, chapter.title, 1, 40);
         integer(`${path}/chars`, chapter.chars, 1);
@@ -146,6 +152,17 @@ export function validateManifest(value) {
             integer(`${path}/audio/bytes`, audio.bytes, 1);
             integer(`${path}/audio/durationMs`, audio.durationMs, 1);
             oneOf(`${path}/audio/timingQuality`, audio.timingQuality, ['exact', 'estimated']);
+            if (audio.format !== undefined) {
+                oneOf(`${path}/audio/format`, audio.format, ['mp3', 'wav']);
+            }
+        }
+        if (chapter.subtitles !== undefined) {
+            const subtitles = object(`${path}/subtitles`, chapter.subtitles);
+            string(`${path}/subtitles/path`, subtitles.path, 1, 400);
+            integer(`${path}/subtitles/units`, subtitles.units, 0);
+            if (subtitles.timingQuality !== undefined) {
+                oneOf(`${path}/subtitles/timingQuality`, subtitles.timingQuality, ['exact', 'estimated']);
+            }
         }
         if (chapter.error !== undefined) {
             const error = object(`${path}/error`, chapter.error);
