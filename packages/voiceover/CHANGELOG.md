@@ -2,6 +2,10 @@
 
 ## 0.3.0
 
+- Accessibility: the progress bar exposes `role="progressbar"` with value text, the
+  state line is a polite live region, the panel's buttons are native with a visible
+  `:focus-visible` ring, and decorative counts are hidden from screen readers.
+
 - Single-chapter rerun: `voiceover_rerun({ chapter })`, the per-row retry button and
   `POST /v1/projects/:id/rerun {"chapter":"ch-03"}` all narrow the same operation.
   Untargeted chapters keep their artifacts; an unknown id fails instead of doing

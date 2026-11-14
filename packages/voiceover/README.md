@@ -72,6 +72,8 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 - 能力条：`模型 改写`／`按原文朗读`、`Edge 可达`／`本地引擎`、`字幕 精确`／`估算`
 - 逐章状态（排队/改写/合成/完成/失败）、时长、是否带字幕
 - 降级与失败原因（warnings）
+- 无障碍：进度条是 `role="progressbar"`（带 `aria-valuetext`），状态词是 `aria-live="polite"` 播报区，
+  按钮为原生 `<button>` 且带可见焦点环，纯装饰的计数对屏幕阅读器隐藏
 
 面板从工具结果里取 `projectId`，随后轮询宿主只读路由 `GET /voiceover/panel/<projectId>.json`
 （同一会话围栏，只返回进度，不返回稿件正文与文件路径）。首章规划期间显示「准备中」，

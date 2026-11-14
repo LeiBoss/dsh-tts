@@ -10,7 +10,7 @@ interface LoadedModule {
 let captured: LoadedModule | undefined
 
 /** The client file is a plain script: it needs the loader global before import. */
-async function loadClient(): Promise<Record<string, unknown>> {
+async function loadClient(reactOverride?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const globals = globalThis as unknown as Record<string, unknown>
   globals.window = {
     __ModuleLoader__: {
@@ -22,11 +22,65 @@ async function loadClient(): Promise<Record<string, unknown>> {
   await import('../client/client.js')
   assert.ok(captured, 'the client bundle must register a factory')
   assert.equal(captured.id, '@leiboss/dsh-voiceover')
-  const react = { createElement: () => null, useState: () => [null, () => {}], useEffect: () => {} }
+  const react = reactOverride ?? {
+    createElement: () => null,
+    useState: () => [null, () => {}],
+    useEffect: () => {},
+  }
   return captured.factory((specifier: string) => {
     assert.equal(specifier, 'react')
     return react
   })
+}
+
+/** One element produced by the recording React shim. */
+interface Element {
+  type: unknown
+  props: Record<string, unknown>
+  children: unknown[]
+}
+
+/**
+ * Minimal React shim: records elements instead of rendering, and keeps hook
+ * slots so a single component call sees stable state.
+ */
+function recordingReact(): { react: Record<string, unknown>; reset: () => void } {
+  const cells: unknown[] = []
+  let cursor = 0
+  return {
+    reset: () => {
+      cursor = 0
+    },
+    react: {
+      createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]): Element => ({
+        type,
+        props: props ?? {},
+        children,
+      }),
+      useState: (initial: unknown) => {
+        const index = cursor
+        cursor += 1
+        if (!(index in cells)) {
+          cells[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [cells[index], () => {}]
+      },
+      useEffect: () => {},
+    },
+  }
+}
+
+/** Flatten a rendered tree into every element node. */
+function collect(node: unknown, out: Element[] = []): Element[] {
+  if (Array.isArray(node)) {
+    for (const child of node) collect(child, out)
+    return out
+  }
+  if (typeof node !== 'object' || node === null) return out
+  const element = node as Element
+  out.push(element)
+  for (const child of element.children ?? []) collect(child, out)
+  return out
 }
 
 test('parses the project id out of a rendered tool result', async () => {
@@ -110,4 +164,54 @@ test('treats an unparsable timestamp as unknown instead of fresh', async () => {
   assert.equal(formatClock(undefined), '')
   assert.equal(formatClock('1970-01-01T00:00:00.000Z'), '')
   assert.match(formatClock(new Date().toISOString()), /^\d{2}:\d{2}:\d{2}$/)
+})
+
+test('renders progress semantics, a live region and a keyboard focus style', async () => {
+  const { react, reset } = recordingReact()
+  const client = await loadClient(react)
+  const seed = client.__seedSnapshot as (id: string, snapshot: unknown) => void
+  const panel = client.VoiceoverPanel as (props: unknown) => unknown
+
+  const projectId = 'abcdef123456'
+  seed(projectId, {
+    projectId,
+    title: '接口测试',
+    done: 1,
+    total: 2,
+    pending: 0,
+    failed: 1,
+    capability: { llm: true, network: true, wordBoundaries: true, timingQuality: 'exact' },
+    engine: { name: 'edge-js', voice: 'zh-CN-XiaoxiaoNeural', rate: '+0%' },
+    chapters: [
+      { id: 'ch-01', order: 1, title: '开头', status: 'done', durationMs: 61000, audioUrl: '/voiceover/audio/x' },
+      { id: 'ch-02', order: 2, title: '结尾', status: 'failed', error: 'EDGE_TTS_FAILED' },
+    ],
+    warnings: [],
+    warningCount: 0,
+    stateUpdatedAt: new Date().toISOString(),
+    servedAt: new Date().toISOString(),
+  })
+  reset()
+
+  const tree = panel({ phase: 'result', block: { content: [{ text: `projectId: ${projectId}` }] } })
+  const nodes = collect(tree)
+
+  const progress = nodes.find((node) => node.props.role === 'progressbar')
+  assert.ok(progress, 'the progress bar must expose a role')
+  assert.equal(progress.props['aria-valuenow'], 1)
+  assert.equal(progress.props['aria-valuemax'], 2)
+  assert.match(String(progress.props['aria-valuetext']), /2 章中完成 1 章/)
+
+  assert.ok(
+    nodes.some((node) => node.props['aria-live'] === 'polite'),
+    'progress changes must be announced',
+  )
+  assert.ok(
+    nodes.some((node) => node.type === 'style' && String(node.children[0]).includes('focus-visible')),
+    'keyboard focus must be visible',
+  )
+
+  const bulk = nodes.find((node) => node.type === 'button' && node.props.className === 'dsh-vo-btn')
+  assert.ok(bulk, 'the retry button is a native, focusable button')
+  assert.equal(bulk.props.disabled, false)
 })

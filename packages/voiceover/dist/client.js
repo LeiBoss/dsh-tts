@@ -68,6 +68,10 @@ window.__ModuleLoader__.load({
     const FONT_META = 'calc(var(--dsh-content-font-size-secondary, 13px) - 2px)'
     const RADIUS = 'var(--dsw-radius-md, 10px)'
 
+    /** Keyboard focus for the panel's own buttons; rendered as a style node. */
+    const FOCUS_CSS =
+      '.dsh-vo-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:6px}'
+
     const S = {
       card: {
         width: '100%',
@@ -157,6 +161,11 @@ window.__ModuleLoader__.load({
     // loading card, and several status rows for one project share progress.
     const snapshots = new Map()
     const inFlight = new Map()
+
+    /** Test-only: seed the shared cache so a render test starts from a settled card. */
+    function __seedSnapshot(projectId, snapshot) {
+      snapshots.set(projectId, snapshot)
+    }
 
     /**
      * Concatenate the model-facing text of a result.
@@ -267,7 +276,7 @@ window.__ModuleLoader__.load({
           : (ERROR_TEXT[chapter.error] ?? '本章失败')
       return h(
         'div',
-        { style: S.row, title: chapter.error ?? undefined },
+        { style: S.row, role: 'listitem', title: chapter.error ?? undefined },
         h('span', { style: { ...S.dot, background: tone } }),
         h('span', { style: S.rowTitle }, `${chapter.id} ${chapter.title}`),
         h('span', { style: chapter.error === undefined ? S.meta : { ...S.meta, color: 'var(--dsw-alias-state-error-primary)' } }, meta),
@@ -275,6 +284,7 @@ window.__ModuleLoader__.load({
           ? h('button',
               {
                 type: 'button',
+                className: 'dsh-vo-btn',
                 style: S.retryBtn,
                 'aria-label': `重跑 ${chapter.id} ${chapter.title}`,
                 disabled: props.retrying,
@@ -286,6 +296,8 @@ window.__ModuleLoader__.load({
             ? h('button',
                 {
                   type: 'button',
+                  className: 'dsh-vo-btn',
+                  'aria-pressed': props.playing,
                   style: S.playBtn,
                   'aria-label': `${props.playing ? '停止' : '播放'} ${chapter.id} ${chapter.title}`,
                   onClick: () => props.onPlay(chapter),
@@ -300,7 +312,7 @@ window.__ModuleLoader__.load({
     function ErrorCard(props) {
       return h(
         'div',
-        { style: S.card },
+        { style: S.card, role: 'status' },
         h('div', { style: S.header }, h('span', { style: S.title }, props.title), h('span', { style: S.count }, '未开始')),
         h('div', { style: S.error }, props.reason),
         h('div', { style: S.state }, props.next),
@@ -311,7 +323,7 @@ window.__ModuleLoader__.load({
     function PendingCard(props) {
       return h(
         'div',
-        { style: S.card },
+        { style: S.card, role: 'status' },
         h('div', { style: S.header }, h('span', { style: S.title }, '有声项目'), h('span', { style: S.count }, props.label)),
       )
     }
@@ -500,15 +512,34 @@ window.__ModuleLoader__.load({
 
       return h(
         'div',
-        { style: S.card },
+        { style: S.card, role: 'group', 'aria-label': '有声项目进度' },
+        h('style', { key: 'vo-a11y' }, FOCUS_CSS),
         h(
           'div',
           { style: S.header },
           h('span', { style: S.title }, snap.title || '有声项目'),
-          h('span', { style: S.count }, total > 0 ? `${done}/${total} 章` : '准备中'),
+          // The visual count is decorative; the live region below carries the
+          // same fact for a screen reader without double-announcing.
+          h('span', { style: S.count, 'aria-hidden': 'true' }, total > 0 ? `${done}/${total} 章` : '准备中'),
         ),
-        h('div', { style: S.track }, h('div', { style: { ...S.fill, width: `${pct}%` } })),
-        h('div', { style: S.state }, stateWord({ ...snap, chapters, pending, failed: failedCount, done, total })),
+        h(
+          'div',
+          {
+            role: 'progressbar',
+            'aria-label': '生成进度',
+            'aria-valuemin': 0,
+            'aria-valuemax': Math.max(1, total),
+            'aria-valuenow': done,
+            'aria-valuetext': total > 0 ? `${total} 章中完成 ${done} 章` : '准备中',
+            style: S.track,
+          },
+          h('div', { style: { ...S.fill, width: `${pct}%` } }),
+        ),
+        h(
+          'div',
+          { style: S.state, 'aria-live': 'polite' },
+          stateWord({ ...snap, chapters, pending, failed: failedCount, done, total }),
+        ),
         h(
           'div',
           { style: S.chips },
@@ -520,7 +551,7 @@ window.__ModuleLoader__.load({
           ? h('div', { style: S.state }, total > 0 ? `正在为 ${total} 章排队…` : '正在规划章节…')
           : h(
               'div',
-              { style: S.list },
+              { style: S.list, role: 'list' },
               chapters.map((chapter) =>
                 h(ChapterRow, {
                   key: chapter.id,
@@ -546,6 +577,7 @@ window.__ModuleLoader__.load({
               autoPlay: true,
               preload: 'none',
               style: S.player,
+              'aria-label': `${playing.id} 音频`,
               onEnded: () => setPlaying(null),
             }),
         failedCount > 0
@@ -554,7 +586,7 @@ window.__ModuleLoader__.load({
               { style: S.actions },
               h(
                 'button',
-                { type: 'button', style: S.action, disabled: busy, onClick: rerun },
+                { type: 'button', className: 'dsh-vo-btn', style: S.action, disabled: busy, onClick: rerun },
                 busy ? '正在续跑…' : `重跑 ${failedCount} 章`,
               ),
             )
@@ -591,6 +623,7 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = ['slots']
+    exports.__seedSnapshot = __seedSnapshot
     exports.projectIdFrom = projectIdFrom
     exports.blocksText = blocksText
     exports.formatDuration = formatDuration
