@@ -117,6 +117,16 @@ window.__ModuleLoader__.load({
         lineHeight: '18px',
       },
       player: { width: '100%', height: 32 },
+      actions: { display: 'flex', gap: 8 },
+      action: {
+        fontSize: FONT_META,
+        padding: '2px 10px',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-brand-primary)',
+        cursor: 'pointer',
+      },
       dot: { width: 8, height: 8, borderRadius: 999 },
       rowTitle: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       meta: {
@@ -305,6 +315,10 @@ window.__ModuleLoader__.load({
       // audio elements, and the URL is stored at click time so a snapshot
       // refresh cannot restart playback.
       const [playing, setPlaying] = react.useState(null)
+      // Bumping this restarts the polling effect, which is how the rerun button
+      // gets fresh progress without a second fetch path.
+      const [nonce, setNonce] = react.useState(0)
+      const [busy, setBusy] = react.useState(false)
 
       react.useEffect(() => {
         if (id === undefined) return undefined
@@ -372,7 +386,7 @@ window.__ModuleLoader__.load({
           stopped = true
           clearTimeout(timer)
         }
-      }, [id])
+      }, [id, nonce])
 
       if (failed) {
         return h(ErrorCard, {
@@ -422,6 +436,26 @@ window.__ModuleLoader__.load({
             ? '字幕 精确时间轴'
             : '字幕 估算时间轴'
 
+      // Same operation the `voiceover_rerun` Tool calls; this is only the
+      // transport. Bumping `nonce` restarts the poller so progress resumes.
+      const rerun = async () => {
+        if (busy) return
+        setBusy(true)
+        try {
+          const res = await fetch(`/voiceover/panel/${id}/rerun`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          })
+          if (res.ok) setNonce((value) => value + 1)
+        } catch {
+          // A dead host is already reported by the poller; leave the button.
+        } finally {
+          setBusy(false)
+        }
+      }
+
       return h(
         'div',
         { style: S.card },
@@ -470,6 +504,17 @@ window.__ModuleLoader__.load({
               style: S.player,
               onEnded: () => setPlaying(null),
             }),
+        failedCount > 0
+          ? h(
+              'div',
+              { style: S.actions },
+              h(
+                'button',
+                { type: 'button', style: S.action, disabled: busy, onClick: rerun },
+                busy ? '正在续跑…' : `重跑 ${failedCount} 章`,
+              ),
+            )
+          : null,
         warnings.length === 0
           ? null
           : h(

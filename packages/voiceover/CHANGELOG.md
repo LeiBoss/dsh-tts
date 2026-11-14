@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- `voiceover_rerun` tool plus a panel button: one operation (`operations.ts`) called
+  from both paths. Finished chapters are skipped by content hash, failed ones rerun.
+- Persist the spoken style in project state so a rerun reproduces the same project
+  key; the operation refuses rather than writing into a directory that other
+  settings produced.
+- Project identity is now computed from the normalized text, so a rerun that reads
+  the persisted source file lands on the same key as the original run.
 ## 0.1.1
 
 - Playback: host registers `/voiceover/audio` (the engine's `AudioRoute` with its own

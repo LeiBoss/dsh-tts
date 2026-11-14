@@ -75,10 +75,8 @@ export class PanelRoute {
     }
     /** Handle one request. Never throws: every path answers or closes. */
     async handle(req, res) {
-        if (req.method !== 'GET') {
-            this.answer(res, 405, { error: 'method not allowed' });
-            return;
-        }
+        // The fence runs before routing: an unauthenticated request learns nothing
+        // about which projects exist.
         const rejection = this.options.connection?.requestRejection?.({ headers: req.headers });
         if (rejection !== undefined) {
             this.answer(res, rejection, { error: 'unauthorized' });
@@ -90,19 +88,52 @@ export class PanelRoute {
             return;
         }
         const name = path.slice(PANEL_ROUTE_PREFIX.length + 1);
-        const match = /^([0-9a-f]{8,24})\.json$/.exec(name);
-        if (match === null) {
-            this.answer(res, 400, { error: 'expected /<projectId>.json' });
+        const snapshotMatch = /^([0-9a-f]{8,24})\.json$/.exec(name);
+        if (snapshotMatch !== null) {
+            if (req.method !== 'GET') {
+                this.answer(res, 405, { error: 'method not allowed' });
+                return;
+            }
+            const projectId = snapshotMatch[1] ?? '';
+            const snapshot = await this.snapshot(projectId);
+            if (snapshot === undefined) {
+                this.answer(res, 404, { error: 'unknown project' });
+                return;
+            }
+            this.options.debug?.(`panel served ${projectId}`);
+            this.answer(res, 200, snapshot);
             return;
         }
-        const projectId = match[1] ?? '';
-        const snapshot = await this.snapshot(projectId);
-        if (snapshot === undefined) {
-            this.answer(res, 404, { error: 'unknown project' });
+        const rerunMatch = /^([0-9a-f]{8,24})\/rerun$/.exec(name);
+        if (rerunMatch !== null) {
+            if (req.method !== 'POST') {
+                this.answer(res, 405, { error: 'method not allowed' });
+                return;
+            }
+            const onRerun = this.options.onRerun;
+            if (onRerun === undefined) {
+                this.answer(res, 501, { error: 'rerun is not available in this host' });
+                return;
+            }
+            const projectId = rerunMatch[1] ?? '';
+            const snapshot = await this.snapshot(projectId);
+            if (snapshot === undefined) {
+                this.answer(res, 404, { error: 'unknown project' });
+                return;
+            }
+            try {
+                await onRerun(projectId);
+                this.options.debug?.(`panel rerun requested ${projectId}`);
+                this.answer(res, 202, { ok: true, projectId });
+            }
+            catch (error) {
+                this.answer(res, 500, {
+                    error: error instanceof Error ? error.message.slice(0, 200) : 'rerun failed',
+                });
+            }
             return;
         }
-        this.options.debug?.(`panel served ${projectId}`);
-        this.answer(res, 200, snapshot);
+        this.answer(res, 400, { error: 'expected /<projectId>.json or /<projectId>/rerun' });
     }
     /** Write one JSON response with no caching. */
     answer(res, status, body) {

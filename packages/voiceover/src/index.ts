@@ -14,6 +14,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { httpCompleter, type Completer } from './llm.ts'
 import { PanelRoute, type ConnectionFence, type HttpRouteRegistrar } from './panel.ts'
+import { rerunProject } from './operations.ts'
 import { runProject, projectKey, type PipelineDeps, type ProjectState, type StyleProfile } from './pipeline.ts'
 import type { SynthResult, Synthesizer } from './types.ts'
 import { readJson } from './util.ts'
@@ -133,6 +134,39 @@ function completer(config: VoiceoverConfig): Completer | undefined {
   })
 }
 
+/** Build the pipeline collaborators for one call site. */
+function pipelineDeps(ctx: Context, config: VoiceoverConfig): PipelineDeps {
+  const model = completer(config)
+  return {
+    ...(model === undefined ? {} : { completer: model }),
+    synth: engineSynthesizer(ctx),
+  }
+}
+
+/**
+ * Start a rerun in the background, deduped per project.
+ *
+ * Both callers (the `voiceover_rerun` Tool and the panel button) land here; the
+ * operation itself lives in `operations.ts`, so neither path owns a copy.
+ */
+function startRerun(ctx: Context, config: VoiceoverConfig, outputDir: string, projectId: string): void {
+  if (inFlight.has(projectId)) return
+  const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined
+  const run = rerunProject(pipelineDeps(ctx, config), {
+    outputDir,
+    projectId,
+    auditSample: config.auditSample ?? 2,
+  })
+  inFlight.set(projectId, run)
+  void run
+    .catch((error: unknown) => {
+      logger?.warn?.(`voiceover rerun failed: ${String(error)}`)
+    })
+    .finally(() => {
+      inFlight.delete(projectId)
+    })
+}
+
 /** Tool definitions; separated so tests can inspect them without a host. */
 export function createVoiceoverTools(
   ctx: Context,
@@ -140,7 +174,7 @@ export function createVoiceoverTools(
   env: NodeJS.ProcessEnv = process.env,
 ): ToolDefinition[] {
   const outputDir = resolveOutputDir(config, env)
-  const model = completer(config)
+  const deps = pipelineDeps(ctx, config)
 
   const create = defineTool({
     name: 'voiceover_create',
@@ -190,10 +224,6 @@ export function createVoiceoverTools(
           ? args.title
           : (args.sourcePath?.replace(/\.[^.]+$/, '').split(/[\\/]/).pop() ?? '未命名')
 
-      const deps: PipelineDeps = {
-        ...(model === undefined ? {} : { completer: model }),
-        synth: engineSynthesizer(ctx),
-      }
       const voice = args.voice ?? config.defaultVoice ?? 'zh-CN-XiaoxiaoNeural'
       const style = (args.style ?? config.style ?? 'news') as StyleProfile
       const rate = config.defaultRate ?? '+0%'
@@ -341,7 +371,36 @@ export function createVoiceoverTools(
     },
   })
 
-  return [create, status, exportTool]
+  const rerun = defineTool({
+    name: 'voiceover_rerun',
+    description:
+      'Resume a voiceover project: finished chapters are skipped, failed or missing ones run again. Returns immediately; poll voiceover_status.',
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Id returned by voiceover_create.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          projectId: { type: 'string', description: 'Project identity.' },
+          status: { type: 'string', description: 'Always `running`; poll voiceover_status.' },
+        },
+      },
+      render: (_args, value) => [
+        {
+          type: 'text' as const,
+          text: [`Resuming project ${value.projectId ?? ''}.`, `projectId: ${value.projectId ?? ''}`].join('\n'),
+        },
+      ],
+    },
+    async execute(args) {
+      const projectId = args.projectId
+      startRerun(ctx, config, outputDir, projectId)
+      return { projectId, status: 'running' }
+    },
+  })
+  return [create, status, exportTool, rerun]
 }
 
 /** Route prefix for per-chapter audio; distinct from the engine's own prefix. */
@@ -374,6 +433,7 @@ function mountWebSurfaces(ctx: Context, config: VoiceoverConfig, env: NodeJS.Pro
     outputDir,
     ...(connection === undefined ? {} : { connection }),
     audioUrlFor: (filePath) => audio.urlFor(filePath),
+    onRerun: (projectId) => startRerun(ctx, config, outputDir, projectId),
     debug,
   })
 

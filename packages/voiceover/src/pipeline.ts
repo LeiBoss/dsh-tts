@@ -62,6 +62,8 @@ export interface ProjectState {
   promptVersion: string
   engine: EngineInfo
   capability: Capability
+  /** Spoken style, persisted so a rerun reproduces the same project key. */
+  style: StyleProfile
   outline: Outline
   chapters: ChapterRecord[]
   /** sha256 of each chapter's input text, for resume decisions. */
@@ -376,7 +378,11 @@ export async function runProject(deps: PipelineDeps, options: ProjectOptions): P
   if (paragraphs.length === 0) throw new Error('The source text is empty after normalization.')
 
   const paths = (dir: string): ReturnType<typeof projectPaths> => projectPaths(dir)
-  const projectId = projectKey({ text: options.text, voice: options.voice, rate: options.rate, style: options.style })
+  // Identity is computed from the normalized text, not the raw input: a rerun
+  // reads the persisted source file (which ends with a newline) and must still
+  // land on the same project key.
+  const normalizedText = paragraphs.join('\n\n')
+  const projectId = projectKey({ text: normalizedText, voice: options.voice, rate: options.rate, style: options.style })
   const projectDir = join(options.outputDir, projectId)
   await mkdir(join(projectDir, 'audio'), { recursive: true })
   await mkdir(join(projectDir, 'script'), { recursive: true })
@@ -405,10 +411,11 @@ export async function runProject(deps: PipelineDeps, options: ProjectOptions): P
 
   const state: ProjectState = {
     projectId,
-    sourceHash: sha256(options.text),
+    sourceHash: sha256(normalizedText),
     promptVersion: PROMPT_VERSION,
     engine,
     capability,
+    style: existing?.style ?? options.style,
     outline,
     chapters: existing?.chapters ?? [],
     inputHashes: existing?.inputHashes ?? {},

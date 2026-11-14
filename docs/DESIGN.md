@@ -479,7 +479,10 @@ voiceover serve [--port 7801] [--host 127.0.0.1] [--token <t>] [--mcp stdio|http
 带 Range 206 与会话围栏）；面板顶部一个播放器 + 逐章 `▶` 切换，URL 在点击时定格，快照刷新不打断播放。
 选单播放器而不是每章一个 `<audio>`：20 章的页面不该挂 20 个音频元素。
 
-**未实现**：操作按钮（单章重跑/导出）。
+**操作（部分实现，0.2.0）**：续跑失败章节——面板按钮与 `voiceover_rerun` 工具共用
+`operations.ts` 里的同一个操作，UI 只负责 POST 到 `/voiceover/panel/<id>/rerun`。
+导出按钮与单章重跑未实现：导出只能返回本机路径，在浏览器里点一下没有可交付的结果，
+不如让 agent 用 `voiceover_export` 把路径念出来。
 按钮需要想清楚「UI 动作 → 工具调用」的授权路径（见 `user-actions.md`：同一操作只实现一次，UI 与工具共用宿主方法），
 所以放在 daemon/MCP 那一步一起做，而不是先做一个只能看的面板动作。
 

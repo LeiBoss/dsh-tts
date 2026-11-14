@@ -81,3 +81,23 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover
 （`/voiceover/audio/...`，有效期 6 小时、与浏览器会话绑定），刷新进度不会打断播放。
 无 Web 宿主时不显示播放控件，用 `voiceover_export` 拿文件路径。要续跑失败的章节，
 对同一份源文再执行一次 `voiceover_create` 即可（项目 ID 由内容哈希决定，已完成的章节会跳过）。
+## 续跑
+
+失败章节不必重建整个项目：
+
+- 对 agent 说「续跑这个项目」→ `voiceover_rerun`（参数 `projectId`）
+- 或直接点面板上的「重跑 N 章」
+
+两条路径调用的是同一个宿主实现（`src/operations.ts` 的 `rerunProject`），面板按钮只是 POST
+`/voiceover/panel/<projectId>/rerun`。已完成的章节按内容哈希跳过，失败或缺失的重新跑；
+`style` 会随 state 持久化，所以重算出的 projectId 与原来一致——不一致时操作会报错拒绝，
+而不是悄悄写进另一个目录。
+
+## 工具
+
+| 工具 | 作用 |
+|---|---|
+| `voiceover_create` | 建项目，立即返回 `projectId` |
+| `voiceover_status` | 查看逐章进度 |
+| `voiceover_export` | 返回音频、字幕、manifest 的绝对路径 |
+| `voiceover_rerun` | 续跑：跳过已完成章节，重跑失败章节 |

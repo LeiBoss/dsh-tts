@@ -191,3 +191,80 @@ test('mints a playback URL only when an audio route is mounted', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+test('POST /rerun runs the shared operation and answers 202', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+    const calls: string[] = []
+    const route = new PanelRoute({
+      outputDir: root,
+      onRerun: (projectId) => {
+        calls.push(projectId)
+      },
+    })
+    const server = fakeServer()
+    route.register(server.server)
+
+    const { res, status, body } = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST'), res)
+
+    assert.equal(status(), 202)
+    assert.deepEqual(calls, [PROJECT_ID])
+    assert.equal(JSON.parse(body()).ok, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rerun is unavailable without a host operation, and methods are enforced', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+    const plain = new PanelRoute({ outputDir: root })
+    const server = fakeServer()
+    plain.register(server.server)
+
+    const cases: [string, string, number][] = [
+      [`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST', 501],
+      [`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'GET', 405],
+      [`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}.json`, 'POST', 405],
+    ]
+    for (const [url, method, expected] of cases) {
+      const { res, status } = fakeResponse()
+      await server.route.handler(fakeRequest(url, method), res)
+      assert.equal(status(), expected, `${method} ${url}`)
+    }
+
+    // With the operation available, an unknown project is a 404, not a 501.
+    const withOp = new PanelRoute({ outputDir: root, onRerun: () => {} })
+    const opServer = fakeServer()
+    withOp.register(opServer.server)
+    const missing = fakeResponse()
+    await opServer.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/deadbeef00/rerun`, 'POST'), missing.res)
+    assert.equal(missing.status(), 404)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a failing rerun answers 500 with the reason instead of hanging', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vo-panel-'))
+  try {
+    await seedProject(root)
+    const route = new PanelRoute({
+      outputDir: root,
+      onRerun: () => {
+        throw new Error('engine unavailable')
+      },
+    })
+    const server = fakeServer()
+    route.register(server.server)
+
+    const { res, status, body } = fakeResponse()
+    await server.route.handler(fakeRequest(`${PANEL_ROUTE_PREFIX}/${PROJECT_ID}/rerun`, 'POST'), res)
+    assert.equal(status(), 500)
+    assert.match(JSON.parse(body()).error, /engine unavailable/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

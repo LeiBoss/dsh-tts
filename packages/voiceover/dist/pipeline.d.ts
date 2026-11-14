@@ -34,6 +34,8 @@ export interface ProjectState {
     promptVersion: string;
     engine: EngineInfo;
     capability: Capability;
+    /** Spoken style, persisted so a rerun reproduces the same project key. */
+    style: StyleProfile;
     outline: Outline;
     chapters: ChapterRecord[];
     /** sha256 of each chapter's input text, for resume decisions. */

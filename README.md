@@ -49,7 +49,7 @@ dsh plugin --profile <profile> add @leiboss/dsh-voiceover  # 产品或引擎一�
 | 断点续跑（内容哈希） | 已实现 + 单测 |
 | 宿主联调脚本 | [`scripts/host-probe/run.ps1`](scripts/host-probe/run.ps1) |
 | 零依赖引擎（`edge-js`） | 已实现 + 单测 + 宿主验证：真实合成、精确时长、词边界随缓存保留 |
-| 对话内进度面板（client） | 已实现：进度条、逐章状态、降级提示；暂无播放 |
+| 对话内进度面板（client） | 已实现：进度条、逐章状态、降级提示、试听、续跑失败章节 |
 | `voiceover serve` / MCP | 未实现 |
 | zip / m4b 导出 | 未实现 |
 

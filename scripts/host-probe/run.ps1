@@ -91,7 +91,7 @@ if (-not (Test-Path $profileDir)) { throw 'profile was not created' }
 
 Step 'install engine + product + probe'
 if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', (Join-Path $packDir 'leiboss-dsh-tts-0.3.0.tgz'))) -ne 0) { throw 'install of @leiboss/dsh-tts failed' }
-if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', (Join-Path $packDir 'leiboss-dsh-voiceover-0.1.1.tgz'))) -ne 0) { throw 'install of @leiboss/dsh-voiceover failed' }
+if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', (Join-Path $packDir 'leiboss-dsh-voiceover-0.2.0.tgz'))) -ne 0) { throw 'install of @leiboss/dsh-voiceover failed' }
 if ((Invoke-Native $dsh @('plugin', '--profile', $Profile, 'add', $probeDir)) -ne 0) { throw 'install of the probe plugin failed' }
 
 Step 'boot twice (cache miss, then cache hit)'
@@ -112,7 +112,7 @@ $first = $results[0]
 $second = $results[1]
 Check ($first.stage -eq 'applied') 'probe applied (inject tools+tts resolved)'
 Check ($first.hasTts -and $first.hasSynthesize) 'ctx.get("tts") returns a service with synthesize()'
-foreach ($name in @('tts_generate', 'tts_self_check', 'tts_probe_network', 'voiceover_create', 'voiceover_status', 'voiceover_export')) {
+foreach ($name in @('tts_generate', 'tts_self_check', 'tts_probe_network', 'voiceover_create', 'voiceover_status', 'voiceover_export', 'voiceover_rerun')) {
   Check ($first.toolNames -contains $name) "tool registered: $name"
 }
 Check (@($first.duplicates).Count -eq 0) 'no duplicate tool registration (engine mounted once)'

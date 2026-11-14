@@ -69,6 +69,11 @@ export interface PanelRouteOptions {
     connection?: ConnectionFence;
     /** Resolves one chapter's audio file to a signed URL, when a route is mounted. */
     audioUrlFor?: (filePath: string) => string | undefined;
+    /**
+     * Resume a project. The panel's button and the `voiceover_rerun` Tool both
+     * call the same implementation through this hook.
+     */
+    onRerun?: (projectId: string) => void | Promise<void>;
     debug?: (message: string) => void;
 }
 /** Serve one project's persisted progress as JSON. */

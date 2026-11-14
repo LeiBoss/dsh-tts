@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { httpCompleter } from "./llm.js";
 import { PanelRoute } from "./panel.js";
+import { rerunProject } from "./operations.js";
 import { runProject, projectKey } from "./pipeline.js";
 import { readJson } from "./util.js";
 export const name = 'dsh-voiceover';
@@ -78,10 +79,42 @@ function completer(config) {
         label: config.llmModel ?? 'deepseek-chat',
     });
 }
+/** Build the pipeline collaborators for one call site. */
+function pipelineDeps(ctx, config) {
+    const model = completer(config);
+    return {
+        ...(model === undefined ? {} : { completer: model }),
+        synth: engineSynthesizer(ctx),
+    };
+}
+/**
+ * Start a rerun in the background, deduped per project.
+ *
+ * Both callers (the `voiceover_rerun` Tool and the panel button) land here; the
+ * operation itself lives in `operations.ts`, so neither path owns a copy.
+ */
+function startRerun(ctx, config, outputDir, projectId) {
+    if (inFlight.has(projectId))
+        return;
+    const logger = typeof ctx.logger === 'function' ? ctx.logger('@leiboss/dsh-voiceover') : undefined;
+    const run = rerunProject(pipelineDeps(ctx, config), {
+        outputDir,
+        projectId,
+        auditSample: config.auditSample ?? 2,
+    });
+    inFlight.set(projectId, run);
+    void run
+        .catch((error) => {
+        logger?.warn?.(`voiceover rerun failed: ${String(error)}`);
+    })
+        .finally(() => {
+        inFlight.delete(projectId);
+    });
+}
 /** Tool definitions; separated so tests can inspect them without a host. */
 export function createVoiceoverTools(ctx, config, env = process.env) {
     const outputDir = resolveOutputDir(config, env);
-    const model = completer(config);
+    const deps = pipelineDeps(ctx, config);
     const create = defineTool({
         name: 'voiceover_create',
         description: [
@@ -128,10 +161,6 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
             const title = args.title !== undefined && args.title.length > 0
                 ? args.title
                 : (args.sourcePath?.replace(/\.[^.]+$/, '').split(/[\\/]/).pop() ?? '未命名');
-            const deps = {
-                ...(model === undefined ? {} : { completer: model }),
-                synth: engineSynthesizer(ctx),
-            };
             const voice = args.voice ?? config.defaultVoice ?? 'zh-CN-XiaoxiaoNeural';
             const style = (args.style ?? config.style ?? 'news');
             const rate = config.defaultRate ?? '+0%';
@@ -271,7 +300,35 @@ export function createVoiceoverTools(ctx, config, env = process.env) {
             };
         },
     });
-    return [create, status, exportTool];
+    const rerun = defineTool({
+        name: 'voiceover_rerun',
+        description: 'Resume a voiceover project: finished chapters are skipped, failed or missing ones run again. Returns immediately; poll voiceover_status.',
+        parameters: {
+            projectId: { type: 'string', required: true, description: 'Id returned by voiceover_create.' },
+        },
+        output: {
+            schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    projectId: { type: 'string', description: 'Project identity.' },
+                    status: { type: 'string', description: 'Always `running`; poll voiceover_status.' },
+                },
+            },
+            render: (_args, value) => [
+                {
+                    type: 'text',
+                    text: [`Resuming project ${value.projectId ?? ''}.`, `projectId: ${value.projectId ?? ''}`].join('\n'),
+                },
+            ],
+        },
+        async execute(args) {
+            const projectId = args.projectId;
+            startRerun(ctx, config, outputDir, projectId);
+            return { projectId, status: 'running' };
+        },
+    });
+    return [create, status, exportTool, rerun];
 }
 /** Route prefix for per-chapter audio; distinct from the engine's own prefix. */
 export const VOICEOVER_AUDIO_PREFIX = '/voiceover/audio';
@@ -301,6 +358,7 @@ function mountWebSurfaces(ctx, config, env = process.env) {
         outputDir,
         ...(connection === undefined ? {} : { connection }),
         audioUrlFor: (filePath) => audio.urlFor(filePath),
+        onRerun: (projectId) => startRerun(ctx, config, outputDir, projectId),
         debug,
     });
     const register = (registrar) => {
