@@ -61,6 +61,11 @@ export interface AudioRouteOptions {
     trustedHosts?: readonly string[];
     /** Host trust fence, when DSH exposes `ctx.connection`. */
     connection?: ConnectionFence;
+    /**
+     * URL and route prefix. Defaults to the engine's own prefix; a consumer such as
+     * the voiceover plugin passes its own so two plugins never contend for one path.
+     */
+    prefix?: string;
 }
 /**
  * Owns the signed-token format and the HTTP handler. One instance per plugin
@@ -68,6 +73,7 @@ export interface AudioRouteOptions {
  */
 export declare class AudioRoute implements AudioUrlProvider {
     private readonly root;
+    private readonly prefix;
     private readonly ttlMs;
     private readonly secret;
     private readonly now;

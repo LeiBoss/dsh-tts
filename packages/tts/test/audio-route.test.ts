@@ -482,3 +482,23 @@ test('apply reads webServer.getOrigin and ignores a throwing getOrigin', async (
   }
 })
 
+
+test('honours a custom route prefix so a consumer never shares the engine path', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-tts-prefix-'))
+  try {
+    const dateDir = join(dir, '2026-11-14')
+    await mkdir(dateDir, { recursive: true })
+    const filePath = join(dateDir, 'abcdef0123456789-1.mp3')
+    await writeFile(filePath, Buffer.from('ID3prefix'))
+
+    const route = new AudioRoute({ outputDir: dir, prefix: '/voiceover/audio' })
+    const server = new FakeServer()
+    route.register(server)
+
+    assert.equal(server.routes[0]?.path, '/voiceover/audio')
+    const url = route.urlFor(filePath)
+    assert.ok(url?.startsWith('/voiceover/audio/'), `unexpected URL: ${url}`)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

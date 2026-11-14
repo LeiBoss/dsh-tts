@@ -89,6 +89,11 @@ export interface AudioRouteOptions {
   trustedHosts?: readonly string[]
   /** Host trust fence, when DSH exposes `ctx.connection`. */
   connection?: ConnectionFence
+  /**
+   * URL and route prefix. Defaults to the engine's own prefix; a consumer such as
+   * the voiceover plugin passes its own so two plugins never contend for one path.
+   */
+  prefix?: string
 }
 
 /** Longest suffix accepted by {@link parseRange}; keeps the parser simple. */
@@ -212,6 +217,7 @@ function loadOrCreateSecret(
  */
 export class AudioRoute implements AudioUrlProvider {
   private readonly root: string
+  private readonly prefix: string
   private readonly ttlMs: number
   private readonly secret: Buffer
   private readonly now: () => number
@@ -226,6 +232,7 @@ export class AudioRoute implements AudioUrlProvider {
 
   constructor(options: AudioRouteOptions) {
     this.root = resolve(options.outputDir)
+    this.prefix = options.prefix ?? AUDIO_ROUTE_PREFIX
     this.ttlMs = options.ttlMs ?? DEFAULT_URL_TTL_MS
     this.now = options.now ?? Date.now
     this.debug = options.debug
@@ -268,7 +275,7 @@ export class AudioRoute implements AudioUrlProvider {
 
     const dispose = server.register({
       kind: 'prefix',
-      path: AUDIO_ROUTE_PREFIX,
+      path: this.prefix,
       handler: (req, res) => this.handle(req, res),
     })
     this.active = true
@@ -295,7 +302,7 @@ export class AudioRoute implements AudioUrlProvider {
     const expires = Math.ceil((this.now() + this.ttlMs) / 1000)
     const encoded = Buffer.from(relativePath, 'utf8').toString('base64url')
     const payload = `${expires}.${encoded}`
-    return `${AUDIO_ROUTE_PREFIX}/${payload}.${this.sign(payload)}`
+    return `${this.prefix}/${payload}.${this.sign(payload)}`
   }
 
   /** Remember the host-advertised origin, trimmed of any trailing slash. */
@@ -346,14 +353,14 @@ export class AudioRoute implements AudioUrlProvider {
     const rawUrl = req.url ?? ''
     const query = rawUrl.indexOf('?')
     const pathname = query === -1 ? rawUrl : rawUrl.slice(0, query)
-    if (!pathname.startsWith(`${AUDIO_ROUTE_PREFIX}/`)) {
+    if (!pathname.startsWith(`${this.prefix}/`)) {
       sendText(res, 404, 'Not Found')
       return
     }
 
     let token: string
     try {
-      token = decodeURIComponent(pathname.slice(AUDIO_ROUTE_PREFIX.length + 1))
+      token = decodeURIComponent(pathname.slice(this.prefix.length + 1))
     } catch {
       sendText(res, 404, 'Not Found')
       return

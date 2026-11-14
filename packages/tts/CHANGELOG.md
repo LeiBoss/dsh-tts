@@ -2,6 +2,10 @@
 
 ## 0.3.0
 
+- `AudioRoute` accepts a `prefix` option (default unchanged). A consumer such as the
+  voiceover plugin reuses the route under its own path instead of contending for
+  `/dsh-tts/audio`.
+
 - The pure-JS backend now returns word boundaries: `node-edge-tts` only parses
   `WordBoundary` metadata when `saveSubtitles` is set, and `streamAudio()` writes
   no files, so the adapter enables it unconditionally.

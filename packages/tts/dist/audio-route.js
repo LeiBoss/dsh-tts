@@ -122,6 +122,7 @@ function loadOrCreateSecret(path, debug) {
  */
 export class AudioRoute {
     root;
+    prefix;
     ttlMs;
     secret;
     now;
@@ -135,6 +136,7 @@ export class AudioRoute {
     origin;
     constructor(options) {
         this.root = resolve(options.outputDir);
+        this.prefix = options.prefix ?? AUDIO_ROUTE_PREFIX;
         this.ttlMs = options.ttlMs ?? DEFAULT_URL_TTL_MS;
         this.now = options.now ?? Date.now;
         this.debug = options.debug;
@@ -173,7 +175,7 @@ export class AudioRoute {
         }
         const dispose = server.register({
             kind: 'prefix',
-            path: AUDIO_ROUTE_PREFIX,
+            path: this.prefix,
             handler: (req, res) => this.handle(req, res),
         });
         this.active = true;
@@ -199,7 +201,7 @@ export class AudioRoute {
         const expires = Math.ceil((this.now() + this.ttlMs) / 1000);
         const encoded = Buffer.from(relativePath, 'utf8').toString('base64url');
         const payload = `${expires}.${encoded}`;
-        return `${AUDIO_ROUTE_PREFIX}/${payload}.${this.sign(payload)}`;
+        return `${this.prefix}/${payload}.${this.sign(payload)}`;
     }
     /** Remember the host-advertised origin, trimmed of any trailing slash. */
     setOrigin(origin) {
@@ -242,13 +244,13 @@ export class AudioRoute {
         const rawUrl = req.url ?? '';
         const query = rawUrl.indexOf('?');
         const pathname = query === -1 ? rawUrl : rawUrl.slice(0, query);
-        if (!pathname.startsWith(`${AUDIO_ROUTE_PREFIX}/`)) {
+        if (!pathname.startsWith(`${this.prefix}/`)) {
             sendText(res, 404, 'Not Found');
             return;
         }
         let token;
         try {
-            token = decodeURIComponent(pathname.slice(AUDIO_ROUTE_PREFIX.length + 1));
+            token = decodeURIComponent(pathname.slice(this.prefix.length + 1));
         }
         catch {
             sendText(res, 404, 'Not Found');
